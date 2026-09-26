@@ -74,12 +74,23 @@ step(5, 'Setting up email-code sign-in');
 await api('PATCH', `/projects/${ref}/config/auth`, {
   site_url: APP_URL,
   uri_allow_list: [APP_URL, 'http://localhost:8765/'].join(','),
-  mailer_subjects_magic_link: 'Your Fuel & Lift sign-in code',
-  mailer_templates_magic_link_content:
-    '<h2>Fuel &amp; Lift</h2><p>Your sign-in code:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">{{ .Token }}</p>' +
-    '<p>Type it in the app, or <a href="{{ .ConfirmationURL }}">tap here</a> on the device you’re signing in on.</p>',
 });
 console.log(`    site ${APP_URL}`);
+// Free-tier projects on Supabase's built-in mailer can't change email templates;
+// sign-in links still work, but the code needs custom SMTP (SETUP.md step 1.4).
+try {
+  await api('PATCH', `/projects/${ref}/config/auth`, {
+    mailer_subjects_magic_link: 'Your Fuel & Lift sign-in code',
+    mailer_templates_magic_link_content:
+      '<h2>Fuel &amp; Lift</h2><p>Your sign-in code:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">{{ .Token }}</p>' +
+      '<p>Type it in the app, or <a href="{{ .ConfirmationURL }}">tap here</a> on the device you’re signing in on.</p>',
+  });
+  console.log('    sign-in email shows a code');
+} catch (e) {
+  if (!/template modification is not available/i.test(e.message)) throw e;
+  console.log('    email template not changed: free-tier projects need custom SMTP first (SETUP.md step 1.4).\n' +
+    '    Sign-in links work; the code for the iPhone home-screen app waits until then.');
+}
 
 // 6. App config
 step(6, 'Writing config.js');
