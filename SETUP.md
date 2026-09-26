@@ -24,6 +24,7 @@ The manual steps below do the same thing by hand.
 4. **Authentication → Emails → Magic Link** template: add a line with the code, e.g.
    `<p>Your sign-in code: <b>{{ .Token }}</b></p>`
    An app installed on the iPhone home screen can't receive links opened in Safari, so the code is what signs you in there.
+   On the free plan Supabase only lets you edit this template once a custom SMTP sender is set up (**Authentication → Emails → SMTP Settings**, e.g. with a free Resend or Brevo account). Until then, sign-in by link works in the browser, and `deploy.mjs` skips this step with a warning; run it again after adding SMTP.
 5. **Authentication → URL Configuration**: set **Site URL** to your app's address (step 3) and add the same address under **Redirect URLs**.
 
 ## 2. Claude (the server function)
