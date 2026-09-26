@@ -73,7 +73,7 @@ if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) console.log('
 step(5, 'Setting up email-code sign-in');
 await api('PATCH', `/projects/${ref}/config/auth`, {
   site_url: APP_URL,
-  uri_allow_list: [APP_URL, 'https://harshith017.github.io/fuel-lift/', 'http://localhost:8765/'].join(','), // old address kept for links sent before the rename
+  uri_allow_list: APP_URL,
 });
 console.log(`    site ${APP_URL}`);
 // Free-tier projects on Supabase's built-in mailer can't change email templates;
