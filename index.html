@@ -291,19 +291,49 @@ table.hits th,table.hits td{text-align:center;padding:6px 3px} table.hits td.l,t
 .fold-body>.grid,.fold-body .grid{gap:12px}
 h2.sect{font-size:17px;color:var(--ink-2);margin:8px 0 -4px}
 .inp{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:7px 10px;color:var(--ink);font:inherit}
+
+/* header settings menu */
+.hright{display:flex;align-items:center;gap:8px}
+.hright[hidden]{display:none}
+.daychip{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.daychip.past{background:var(--warn);border-color:var(--warn);color:#1b1405}
+.gear svg{width:19px;height:19px;fill:none;stroke:var(--ink-2);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.menu{position:fixed;z-index:30;top:calc(58px + env(safe-area-inset-top,0px));right:max(12px, calc((100vw - 1040px)/2));width:min(380px, calc(100vw - 24px));max-height:calc(100vh - 150px - env(safe-area-inset-top,0px));overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.35);display:flex;flex-direction:column}
+.menu[hidden]{display:none}
+.menu-h{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.menu-sec{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.menu-sec:last-child{border-bottom:0}
+.menu-l{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);font-weight:600}
+.menu .datenav{justify-content:space-between}
+.menu .datenav .d{flex:1}
+.menu-pick{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;color:var(--ink-2)}
+.fold.inline>summary{padding:10px 0;min-height:0}
+.fold.inline>.fold-body{padding:0 0 4px}
+.fold.inline{border-bottom:0}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
     <div class="brand">Fuel <span>&amp;</span> Lift <i id="syncDot" class="sync" aria-hidden="true"></i></div>
-    <div class="datenav">
-      <button class="iconbtn" id="prevDay" aria-label="Previous day">&#8249;</button>
-      <div class="d" id="dateLabel">Today</div>
-      <button class="iconbtn" id="nextDay" aria-label="Next day">&#8250;</button>
-      <button class="linkbtn" id="goToday" hidden>Today</button>
+    <div class="hright">
+      <button class="daychip" id="dayChip">Today</button>
+      <button class="iconbtn gear" id="menuBtn" aria-label="Settings" aria-expanded="false" aria-controls="menu"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     </div>
   </header>
+  <div class="menu" id="menu" role="dialog" aria-label="Settings" hidden>
+    <div class="menu-h"><b>Settings</b><button class="iconbtn" id="menuClose" aria-label="Close settings">&#10005;</button></div>
+    <div class="menu-sec"><div class="menu-l">Date</div>
+      <div class="datenav">
+        <button class="iconbtn" id="prevDay" aria-label="Previous day">&#8249;</button>
+        <div class="d" id="dateLabel">Today</div>
+        <button class="iconbtn" id="nextDay" aria-label="Next day">&#8250;</button>
+        <button class="linkbtn" id="goToday" hidden>Today</button>
+      </div>
+      <label class="menu-pick">Jump to a date <input type="date" id="datePick" class="inp"></label>
+    </div>
+    <div id="menuBody"></div>
+  </div>
   <main id="main"></main>
 </div>
 <nav class="tabs" aria-label="Sections"><div class="in">

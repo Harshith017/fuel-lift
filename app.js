@@ -157,7 +157,7 @@ const S = {
   reports:[], repSel:null, repMarker:null, repBusy:false, repStatus:'', reviews:[], plans:[], planBusy:false, planStatus:'', planFor:null, planNote:'', revBusy:false, revStatus:'', ideas:null, ideasBusy:false,
   queue:[], qBusy:false, qStatus:'', setup:null, setupShown:false,
   photo:null, photoUrl:null, busy:false, ctl:null, status:'', statusErr:false,
-  rev:0, openFolds:new Set(), sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
+  rev:0, openFolds:(()=>{ try { return new Set(JSON.parse(localStorage.getItem('fl:folds')||'[]')); } catch { return new Set(); } })(), sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
 };
 const prof = () => ({...DEFAULT_PROFILE, ...(S.profile||{})});
 const targets = (date) => computeTargets(prof(), date);
@@ -1143,11 +1143,13 @@ function ideasHtml(){
 }
 
 /* ---------- recent foods ---------- */
+// The foods you log most often in the last 30 days (latest portion of each), most frequent first.
 function recentFoods(){
-  const seen=new Set(), out=[];
-  for (let i=0;i<21 && out.length<8;i++){ const d=S.days.get(addDays(localDate(),-i)); if(!d) continue;
-    for (const f of (d.foods||[]).slice().reverse()) { const k=exKey(f.name)+'|'+exKey(f.quantity||f.grams); if (seen.has(k)) continue; seen.add(k); out.push(f); if (out.length>=8) break; } }
-  return out;
+  const seen=new Map();
+  for (let i=0;i<30;i++){ const d=S.days.get(addDays(localDate(),-i)); if(!d) continue;
+    (d.foods||[]).slice().reverse().forEach((f,j) => { const k=exKey(f.name)+'|'+exKey(f.quantity||f.grams); const e=seen.get(k);
+      if (e) e.n++; else seen.set(k, {f, n:1, order:i*1000+j}); }); }
+  return [...seen.values()].sort((a,b)=>b.n-a.n || a.order-b.order).slice(0,10).map(x=>x.f);
 }
 
 /* ---------- training load ---------- */
@@ -1374,7 +1376,7 @@ function loggerHtml(kind){
       <button class="btn" data-action="log" ${S.busy?'disabled':''}>${S.busy?'Working…':'Log'}</button>
     </div>
     <div class="status${S.statusErr?' err':''}" id="logStatus" aria-live="polite">${esc(S.status)}</div>
-    ${kind!=='gym'&&recentFoods().length?`<div class="chips" aria-label="Recent foods"><span class="muted small" style="align-self:center">Log again:</span>${recentFoods().map(f=>`<button class="chip" style="border-style:solid" data-action="relog" data-id="${f.id}">${esc(f.name)}${f.quantity?' · '+esc(f.quantity):''}</button>`).join('')}</div>`:''}
+    ${kind!=='gym'&&recentFoods().length?fold('d-quick', 'Quick add', `${recentFoods().length} foods you eat often`, `<div class="chips" aria-label="Frequent foods">${recentFoods().map(f=>`<button class="chip" style="border-style:solid" data-action="relog" data-id="${f.id}">${esc(f.name)}${f.quantity?' · '+esc(f.quantity):''}</button>`).join('')}</div>`, 'inline'):''}
     ${kind==='gym'||!recentFoods().length?`<div class="chips" aria-label="Examples"><span class="muted small" style="align-self:center">Try:</span>${(kind==='gym'?EXAMPLES.slice(5):EXAMPLES.slice(0,6)).map(x=>`<button class="chip" data-action="example" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}
   </section>`;
 }
@@ -1439,8 +1441,8 @@ function exerciseDetail(r){
 }
 /* ---------- shared bits for the new layout ---------- */
 // A row that folds open. Open state survives re-renders (S.openFolds).
-function fold(key, title, sub, body){
-  return `<details class="fold" data-fold="${esc(key)}" ${S.openFolds.has(key)?'open':''}><summary><span class="ttl">${title}</span>${sub?`<span class="muted small sub">${sub}</span>`:''}</summary><div class="fold-body">${body}</div></details>`;
+function fold(key, title, sub, body, cls=''){
+  return `<details class="fold${cls?' '+cls:''}" data-fold="${esc(key)}" ${S.openFolds.has(key)?'open':''}><summary><span class="ttl">${title}</span>${sub?`<span class="muted small sub">${sub}</span>`:''}</summary><div class="fold-body">${body}</div></details>`;
 }
 function spark(vals, color){
   const v = vals.filter(x=>Number.isFinite(x)); if (v.length<2) return '';
@@ -1478,19 +1480,17 @@ function viewToday(){
       </div>
     </section>
     ${loggerHtml('today')}
-    <section class="panel" aria-label="Food">
-      <div class="panel-head"><h2>Food</h2><span class="muted small">${(day.foods||[]).length} item${(day.foods||[]).length===1?'':'s'} · ${n0(t.kcal)} kcal</span></div>
+    <section class="panel folds" aria-label="What I ate and trained">
+      ${fold('d-food', 'What I ate today', (day.foods||[]).length?`${(day.foods||[]).length} item${(day.foods||[]).length===1?'':'s'} · ${n0(t.kcal)} kcal`:'nothing yet', `
       ${byMeal.length ? byMeal.map(g=>`<div class="meal"><div class="meal-h"><span>${g.m}</span><span class="num">${n0(g.items.reduce((s,f)=>s+f.kcal,0))} kcal</span></div>
         ${g.items.map(f=>`<div class="item"><div><div class="nm">${esc(f.name)} ${f.confidence!=='high'?`<span class="tag est" title="Estimated portion">est.</span>`:''}${f.source==='photo'?' <span class="tag">photo</span>':''}${f.check?' <span class="tag est" title="Calories don’t match the protein, carbs and fat. Tap Edit to check.">check</span>':''}</div>
           <div class="sub">${esc(f.quantity||(f.grams?n0(f.grams)+' g':''))} · P ${n0(f.protein)} · C ${n0(f.carbs)} · F ${n0(f.fat)}</div></div>
           <div class="kc">${n0(f.kcal)}</div>
           <div class="acts"><button data-action="editFood" data-id="${f.id}" aria-label="Edit ${esc(f.name)}">Edit</button><button data-action="delFood" data-id="${f.id}" aria-label="Delete ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`).join('')
         : `<div class="empty">Nothing logged yet. Type a meal above, like “2 eggs, 2 slices brown bread, 1 banana”.</div>`}
-      ${(day.foods||[]).length?`<label class="check muted small" style="margin-top:12px"><input type="checkbox" data-action="dayComplete" ${day.incomplete?'':'checked'}> I logged everything I ate on this day (days you untick are left out when your real maintenance is measured)</label>`:''}
-    </section>
-    <section class="panel" aria-label="Training">
-      <div class="panel-head"><h2>Training</h2>${t.burned?`<span class="muted small num">${n0(t.burned)} kcal</span>`:''}</div>
-      ${hasTraining ? activityPanel(day) : `<div class="empty">No training logged. Type it in the box above, like “bench 60kg 3x8, squat 80x5 x5 x5” or “badminton doubles 1 hr”.</div>`}
+      ${(day.foods||[]).length?`<label class="check muted small" style="margin-top:12px"><input type="checkbox" data-action="dayComplete" ${day.incomplete?'':'checked'}> I logged everything I ate on this day (days you untick are left out when your real maintenance is measured)</label>`:''}`)}
+      ${fold('d-train', 'What I trained today', hasTraining?[...(day.exercises||[]).length?[`gym · ${(day.exercises||[]).length} exercise${(day.exercises||[]).length===1?'':'s'}`]:[], ...(day.sports||[]).map(a=>`${actTitle(a)}${a.minutes?` ${n0(a.minutes)} min`:''}`)].join(' · ')+(t.burned?` · ${n0(t.burned)} kcal`:''):'nothing yet',
+        hasTraining ? activityPanel(day) : `<div class="empty">No training logged. Type it in the box above, like “bench 60kg 3x8, squat 80x5 x5 x5” or “badminton doubles 1 hr”.</div>`)}
     </section>
     <section class="panel" aria-label="Water, steps and sleep">
       <div class="dgrid three">
@@ -1544,8 +1544,6 @@ function viewGym(){
   if (S.gymEx && !rows.find(r=>r.e.key===S.gymEx)) S.gymEx=null;
   const sel = rows.find(r=>r.e.key===S.gymEx);
   return `<div class="grid">
-    ${growthDash(rows)}
-    ${sel ? exerciseDetail(sel) : ''}
     <div class="panel-head"><h2>${S.gymPeriod==='week'?'This week':'This month'}</h2>
       <div class="seg" role="group" aria-label="Period"><button data-action="gymPeriod" data-p="week" aria-pressed="${S.gymPeriod==='week'}">Week</button><button data-action="gymPeriod" data-p="month" aria-pressed="${S.gymPeriod==='month'}">Month</button></div></div>
     <div class="tiles">
@@ -1555,6 +1553,8 @@ function viewGym(){
       <div class="tile"><span class="l">Training kcal</span><span class="v">${n0(a.kcal)}</span>${delta(a.kcal,b.kcal)}</div>
     </div>
     <div class="muted small">Changes compare ${S.gymPeriod==='week'?'this week so far':'this month so far'} with all of ${label}. Volume = weight × reps across every set.</div>
+    ${growthDash(rows)}
+    ${sel ? exerciseDetail(sel) : ''}
     ${loadPanel()}
     ${planCard(false)}
   </div>`;
@@ -1744,11 +1744,9 @@ function viewProfile(){
     <section class="panel folds">
       ${fold('s-review', 'Coach review', rv?`last ${esc(fmtDate(rv.date,{day:'numeric',month:'short'}))}`:'weekly check-in', reviewPanel())}
       ${fold('s-profile', 'My details', `${esc(p.sex)} · ${n1(who(localDate()).kg)} kg · ${esc((GOALS[p.goal]||{}).label||'')}`, profileForm())}
-      ${fold('s-security', 'Password &amp; security', '', securityFold())}
       ${fold('s-data', 'Download my data', 'Excel', dataFold())}
       ${fold('s-connect', 'Watch &amp; health apps', p.watch_workouts?'watch on':'', connectFold())}
       ${fold('s-sports', 'Sports &amp; food list', `${Object.keys(p.sports||{}).length} sport${Object.keys(p.sports||{}).length===1?'':'s'}`, `<h3>Sports you play</h3>${sportsProfileHtml()}<h3>Your food list</h3>${foodListHtml()}`)}
-      ${fold('s-account', 'Account', esc(S.user?.email||''), accountFold())}
     </section>
   </div>`;
 }
@@ -1902,13 +1900,16 @@ function render(){
   $('#syncDot').className = 'sync ' + (S.user ? S.sync : '');
   $('#syncDot').title = {synced:'Saved', saving:'Saving…', offline:'Offline: saved on this device', error:'Sync problem: retrying'}[S.sync]||'';
   $('#dateLabel').textContent = isToday ? 'Today, ' + fmtDate(S.date,{day:'numeric',month:'short'}) : fmtDate(S.date);
+  const chip = $('#dayChip'); chip.textContent = isToday ? fmtDate(S.date,{weekday:'short',day:'numeric',month:'short'}) : fmtDate(S.date,{weekday:'short',day:'numeric',month:'short'})+' · back to today'; chip.classList.toggle('past', !isToday);
+  $('#datePick').max = localDate(); $('#datePick').value = S.date;
+  if (!$('#menu').hidden && $('#menuAcct')) $('#menuAcct').innerHTML = accountFold(); // leaves the password box alone
   $('#goToday').hidden = isToday;
   $('#nextDay').disabled = isToday;
   document.querySelectorAll('.tab').forEach(b => { if (b.dataset.view===S.view) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   const ta = $('#logText'); const draft = ta ? ta.value : ''; const hadFocus = document.activeElement===ta;
   let html = '';
-  if (!S.user) { $('#main').innerHTML = authView(); document.querySelector('.tabs').hidden = true; document.querySelector('.datenav').hidden = true; return; }
-  document.querySelector('.tabs').hidden = false; document.querySelector('.datenav').hidden = false;
+  if (!S.user) { $('#main').innerHTML = authView(); document.querySelector('.tabs').hidden = true; document.querySelector('.hright').hidden = true; $('#menu').hidden = true; return; }
+  document.querySelector('.tabs').hidden = false; document.querySelector('.hright').hidden = false;
   if (S.sync==='offline') html += `<div class="banner" style="margin-bottom:16px">You’re offline. Everything you log is saved on this device and syncs when you’re back online.</div>`;
   else if (S.sync==='error') html += `<div class="banner" style="margin-bottom:16px">Couldn’t sync with the server. Your changes are safe on this device; retrying.</div>`;
   if (S.dbState==='connecting') html += `<div class="muted small" style="margin-bottom:12px">Loading your log…</div>`;
@@ -2038,7 +2039,9 @@ document.addEventListener('change', ev => {
   if (el.dataset && el.dataset.action==='stackAuto') saveProfile({...prof(), stack_auto:el.checked});
   if (el.dataset && el.dataset.action==='watchToggle') saveProfile({...prof(), watch_workouts:el.checked});
 });
-document.addEventListener('toggle', ev => { const k = ev.target.dataset && ev.target.dataset.fold; if (k) { if (ev.target.open) S.openFolds.add(k); else S.openFolds.delete(k); } }, true);
+document.addEventListener('toggle', ev => { const k = ev.target.dataset && ev.target.dataset.fold; if (!k) return;
+  if (ev.target.open) S.openFolds.add(k); else S.openFolds.delete(k);
+  try { localStorage.setItem('fl:folds', JSON.stringify([...S.openFolds])); } catch {} }, true);
 document.addEventListener('input', ev => bindInput(ev.target));
 document.addEventListener('change', ev => bindInput(ev.target));
 function bindInput(el){
@@ -2065,6 +2068,24 @@ $('#importInput').addEventListener('change', ev => { const f=ev.target.files?.[0
 $('#prevDay').onclick = () => { S.date=addDays(S.date,-1); S.status=''; render(); };
 $('#nextDay').onclick = () => { if (S.date<localDate()) { S.date=addDays(S.date,1); S.status=''; render(); } };
 $('#goToday').onclick = () => { S.date=localDate(); render(); };
+$('#datePick').onchange = ev => { const v=ev.target.value; if (v && v<=localDate()) { S.date=v; S.status=''; render(); } };
+function menuHtml(){
+  return `<div class="menu-sec"><div class="menu-l">Account</div><div id="menuAcct">${accountFold()}</div></div>
+    <div class="menu-sec"><div class="menu-l">Password &amp; security</div>${securityFold()}</div>`;
+}
+function setMenu(open){
+  const m=$('#menu'); m.hidden=!open; $('#menuBtn').setAttribute('aria-expanded', String(open));
+  if (open) { $('#menuBody').innerHTML = menuHtml(); if (!S.usage && S.sample) refreshUsage(); }
+}
+$('#menuBtn').onclick = () => setMenu($('#menu').hidden);
+$('#menuClose').onclick = () => setMenu(false);
+$('#dayChip').onclick = () => { if (S.date!==localDate()) { S.date=localDate(); render(); } else setMenu($('#menu').hidden); };
+// A tap outside closes the menu and nothing else: the same tap must not also press what's underneath.
+let swallowClick = false, swallowT;
+document.addEventListener('pointerdown', ev => { if (!$('#menu').hidden && !ev.target.closest('#menu,#menuBtn,#dayChip')) {
+  setMenu(false); swallowClick = true; clearTimeout(swallowT); swallowT = setTimeout(() => { swallowClick = false; }, 600); } }, true);
+document.addEventListener('click', ev => { if (swallowClick) { swallowClick = false; ev.preventDefault(); ev.stopPropagation(); } }, true);
+document.addEventListener('keydown', ev => { if (ev.key==='Escape' && !$('#menu').hidden) setMenu(false); });
 
 // chart tooltips
 const tip = $('#tip');
