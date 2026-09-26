@@ -1,4 +1,4 @@
-/* Fuel & Lift — backend adapters.
+/* MaxxTempo — backend adapters.
    FL.makeDb: a small document store with the same shape the app used on
    claude.ai (doc().set/delete, collection().get/orderBy/limit/onSnapshot),
    backed by the Supabase `docs` table. Writes land in a local cache first

@@ -1,4 +1,4 @@
-# Fuel & Lift
+# MaxxTempo
 
 Food, training, recovery and health tracking. Type or photograph what you ate or did, and Claude turns it into calories, macros, micronutrients, training load and recovery advice. Your targets come from tested formulas, then correct themselves from your own weigh-ins and food logs.
 

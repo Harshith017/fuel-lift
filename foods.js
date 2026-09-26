@@ -1,4 +1,4 @@
-/* Fuel & Lift — built-in foods. Loaded before app.js; also required by calc.test.js. */
+/* MaxxTempo — built-in foods. Loaded before app.js; also required by calc.test.js. */
 (function (root) {
 /* ---------- built-in food table ----------
    Per 100 g as eaten. Columns after units: kcal, protein, carbs, fat, fibre, sugar,

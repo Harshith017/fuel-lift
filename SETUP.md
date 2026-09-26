@@ -1,4 +1,4 @@
-# Fuel & Lift: setup
+# MaxxTempo: setup
 
 About an hour, once. You create the accounts and paste a few keys; everything else is in this folder.
 
