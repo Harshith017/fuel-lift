@@ -62,7 +62,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 /* tabs */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));background:var(--surface);border-top:1px solid var(--line)}
-.tabs .in{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;width:100%;max-width:520px}
+.tabs .in{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;width:100%;max-width:520px}
 .tab{border:0;background:none;padding:6px 2px;min-height:52px;border-radius:10px;cursor:pointer;font-family:var(--body);font-size:11.5px;font-weight:600;letter-spacing:.01em;color:var(--ink-3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
 .tab svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tab[aria-current="page"]{background:var(--btn);color:var(--btn-ink)}
@@ -245,6 +245,52 @@ dialog::backdrop{background:rgba(10,14,12,.45)}
 .sync.synced{background:var(--good)} .sync.saving{background:var(--warn)} .sync.offline{background:var(--ink-3)} .sync.error{background:var(--bad)}
 .setup{margin-top:24px}
 .setup p{line-height:1.5}
+
+/* dashboard cells */
+.dgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 12px}
+@media (min-width:760px){.dash .dgrid{grid-template-columns:repeat(6,1fr)}}
+.dcell{display:flex;flex-direction:column;gap:3px;min-width:0}
+.dcell .l{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);font-weight:600}
+.dcell .p{font-family:var(--display);font-size:26px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums}
+.dcell .p small{font-size:14px;color:var(--ink-3);margin-left:1px;font-weight:600}
+.dcell .p.bad{color:var(--bad)}
+.dcell .meter{height:6px;margin:2px 0}
+.dcell .val{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;line-height:1.3}
+/* gym progress */
+.exgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media (min-width:760px){.exgrid{grid-template-columns:repeat(3,1fr)}}
+.excell{text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;color:inherit;font:inherit;cursor:pointer;min-width:0}
+.excell.sel{border-color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--ink-2)}
+.excell .nm{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.excell .v{font-family:var(--display);font-size:24px;font-weight:700;line-height:1.1}
+.excell .v small{font-size:12px;color:var(--ink-3)}
+.excell .delta{font-size:12px}
+.spark{width:100%;height:26px;margin-top:4px}
+/* 7-day bars */
+.wbars{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;align-items:end}
+.wb{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.wv{font-size:10.5px;color:var(--ink-3);height:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.wtrack{position:relative;width:100%;max-width:30px;height:64px;background:var(--surface-2);border-radius:5px;overflow:hidden}
+.wfill{position:absolute;left:0;right:0;bottom:0}
+.wt{position:absolute;left:0;right:0;height:0;border-top:1.5px dashed var(--ink-2);z-index:1}
+.wd{font-size:11px;color:var(--ink-3)} .wd.now{color:var(--ink);font-weight:700}
+.panel.wk{gap:10px}
+table.hits th,table.hits td{text-align:center;padding:6px 3px} table.hits td.l,table.hits th.l{text-align:left} table.hits td.r{text-align:right}
+.hits .ok{color:var(--good);font-weight:700} .hits .no{color:var(--bad)}
+/* folding rows */
+.panel.folds{padding:0;gap:0}
+.fold{border-bottom:1px solid var(--line)} .fold:last-child{border-bottom:0}
+.fold>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:14px 16px;min-height:52px;cursor:pointer}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary .ttl{font-weight:650;flex:1;min-width:0}
+.fold>summary .sub{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
+.fold>summary::after{content:'';width:7px;height:7px;border-right:2px solid var(--ink-3);border-bottom:2px solid var(--ink-3);transform:rotate(45deg) translateY(-2px);flex:none;transition:transform .15s}
+.fold[open]>summary::after{transform:rotate(-135deg) translateY(-2px)}
+.fold-body{padding:0 16px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.fold-body .panel{border:0;padding:0;background:none;border-radius:0}
+.fold-body>.grid,.fold-body .grid{gap:12px}
+h2.sect{font-size:17px;color:var(--ink-2);margin:8px 0 -4px}
+.inp{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:7px 10px;color:var(--ink);font:inherit}
 </style>
 </head>
 <body>
@@ -263,7 +309,6 @@ dialog::backdrop{background:rgba(10,14,12,.45)}
 <nav class="tabs" aria-label="Sections"><div class="in">
   <button class="tab" data-view="today" aria-current="page"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Today</span></button>
   <button class="tab" data-view="gym"><svg viewBox="0 0 24 24"><path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg><span>Train</span></button>
-  <button class="tab" data-view="coach"><svg viewBox="0 0 24 24"><path d="M4.5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h10A2.5 2.5 0 0 1 19.5 7v7a2.5 2.5 0 0 1-2.5 2.5H8z"/><path d="M8.5 9.5h7M8.5 12.5h4.5"/></svg><span>Coach</span></button>
   <button class="tab" data-view="trends"><svg viewBox="0 0 24 24"><path d="M4 19.5h16"/><path d="M5 15l4.5-4.5 3.5 3 6-6.5"/><path d="M15 7h4v4"/></svg><span>Trends</span></button>
   <button class="tab" data-view="profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.2-3.6 4.1-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/></svg><span>Profile</span></button>
 </div></nav>
