@@ -1,0 +1,15 @@
+{
+ "name": "Fuel & Lift",
+ "short_name": "Fuel & Lift",
+ "description": "Food, training, recovery and health tracking.",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#0F1411",
+ "theme_color": "#16201B",
+ "icons": [
+  { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+  { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+  { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+ ]
+}
