@@ -16,7 +16,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const API = 'https://api.supabase.com/v1';
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN;
-const APP_URL = process.env.APP_URL || 'https://harshith017.github.io/fuel-lift/';
+const APP_URL = process.env.APP_URL || 'https://harshith017.github.io/maxxtempo/';
 const WANT = process.argv[2] || process.env.SUPABASE_PROJECT || 'fuel-lift';
 
 if (!TOKEN) { console.error('Set SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens).'); process.exit(1); }
@@ -73,7 +73,7 @@ if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) console.log('
 step(5, 'Setting up email-code sign-in');
 await api('PATCH', `/projects/${ref}/config/auth`, {
   site_url: APP_URL,
-  uri_allow_list: [APP_URL, 'http://localhost:8765/'].join(','),
+  uri_allow_list: [APP_URL, 'https://harshith017.github.io/fuel-lift/', 'http://localhost:8765/'].join(','), // old address kept for links sent before the rename
 });
 console.log(`    site ${APP_URL}`);
 // Free-tier projects on Supabase's built-in mailer can't change email templates;
