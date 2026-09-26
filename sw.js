@@ -1,6 +1,6 @@
 /* MaxxTempo service worker: the app opens offline after the first visit.
    Bump VERSION when shipping changes. */
-const VERSION = 'fuel-lift-v9';
+const VERSION = 'fuel-lift-v10';
 const SHELL = ['./', 'index.html', 'config.js', 'calc.js', 'foods.js', 'backend.js', 'app.js', 'manifest.json', 'icon-192.png', 'icon-180.png', 'icon-512.png'];
 const LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 
