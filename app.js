@@ -56,6 +56,7 @@ const weekStart = date => { const t=new Date(date+'T00:00:00Z'); return addDays(
 const monthStart = date => date.slice(0,8)+'01';
 const fmtDate = (date,opts={weekday:'short',day:'numeric',month:'short'}) => new Date(date+'T00:00:00').toLocaleDateString('en-IN',opts);
 const n0 = v => Math.round(Number(v)||0).toLocaleString('en-IN');
+const fmtL = ml => { const l = Math.round((ml||0)/10)/100; return String(l); };
 const n1 = v => { const x=Math.round((Number(v)||0)*10)/10; return x.toLocaleString('en-IN',{maximumFractionDigits:1}); };
 const fmtAmt = (v,unit) => (unit==='g'||unit==='mcg'&&v<10 ? n1(v) : n0(v));
 const num = (v,max=1e5) => { const x=Number(v); return Number.isFinite(x)&&x>0 ? Math.min(x,max) : 0; };
@@ -862,7 +863,7 @@ function todayBanners(){
 function startSetup(step){
   const p = prof();
   const keys = Object.keys(p.sports||{});
-  S.setup = {step: step||'about', about:{sex:p.sex, birth:p.birth||'', height_cm:p.height_cm, weight_kg:p.weight_kg, goal:p.goal, goal_rate:p.goal_rate, activity:p.activity, watch_workouts:!!p.watch_workouts},
+  S.setup = {step: step||'about', about:{name:p.name||'', sex:p.sex, birth:p.birth||'', height_cm:p.height_cm, weight_kg:p.weight_kg, goal:p.goal, goal_rate:p.goal_rate, activity:p.activity, watch_workouts:!!p.watch_workouts},
     sports:keys, other:'', answers:Object.fromEntries(keys.map(k=>[k, Object.fromEntries(((p.sports[k]||{}).answers||[]).map(a=>[a.id,a.a]))])), qs:{}};
   S.view='setup'; render(); window.scrollTo({top:0});
 }
@@ -875,6 +876,7 @@ function viewSetup(){
   if (su.step==='about') return `<section class="panel setup">${head}
     <h3>About you</h3><p class="muted small">This sets your calorie, protein, water and nutrient targets.</p>
     <div class="form">
+      <label class="field full">Your name<input type="text" maxlength="40" autocomplete="given-name" data-bind="about.name" placeholder="What should the app call you?" value="${esc(a.name||'')}"></label>
       <label class="field">Sex<select data-bind="about.sex">${sel('sex',{male:'Male',female:'Female'})}</select></label>
       <label class="field">Date of birth<input type="date" data-bind="about.birth" max="${localDate()}" value="${esc(a.birth)}"></label>
       <label class="field">Height (cm)<input type="number" step="0.5" data-bind="about.height_cm" value="${esc(a.height_cm)}"></label>
@@ -916,7 +918,7 @@ async function setupGo(dir){
       sports[k] = {name:sportName(k), answers:qs.map(q=>({id:q.id, q:q.text, a:(su.answers[k]||{})[q.id]??''})), updated:localDate()}; if (prev && JSON.stringify(prev.answers)===JSON.stringify(sports[k].answers)) sports[k].updated = prev.updated; }
     const birthOk = /^\d{4}-\d{2}-\d{2}$/.test(a.birth||'') && Calc.ageOn(a.birth, localDate())>=13;
     if (!birthOk) { toast('Add your date of birth on step 1: targets depend on age.'); su.step='about'; render(); return; }
-    await saveProfile({...p, sex:a.sex, birth:a.birth, age:Calc.ageOn(a.birth, localDate()), height_cm:num(a.height_cm,250)||170, weight_kg:num(a.weight_kg,300)||70, activity:actId(a.activity), goal:a.goal, goal_rate:Number(a.goal_rate)||0.5, watch_workouts:!!a.watch_workouts, sports});
+    await saveProfile({...p, name:String(a.name||'').trim().slice(0,40), sex:a.sex, birth:a.birth, age:Calc.ageOn(a.birth, localDate()), height_cm:num(a.height_cm,250)||170, weight_kg:num(a.weight_kg,300)||70, activity:actId(a.activity), goal:a.goal, goal_rate:Number(a.goal_rate)||0.5, watch_workouts:!!a.watch_workouts, sports});
     if (num(a.weight_kg,300) && !getDay(localDate()).weight_kg) writeDay(localDate(), d => { d.weight_kg = num(a.weight_kg,300); });
     S.setup=null; S.view='today'; toast('Saved. Your targets and sport details are set.'); render(); window.scrollTo({top:0}); return;
   }
@@ -1546,7 +1548,7 @@ function viewToday(){
       ${(()=>{ const full = Math.floor(t.water/250), glasses = Math.min(12, Math.max(4, Math.ceil(WT/250), full));
         const stW = t.water>0 ? goalState(t.water, WT, 'more') : null, stS = H.steps ? goalState(H.steps, goal, 'more') : null, stZ = H.sleep_min ? goalState(H.sleep_min, 420, 'more') : null;
         const bar = (v, tg, st) => `<div class="meter"><i style="width:${Math.min(100,P(v,tg))}%;background:${st?stBar(st):'var(--ink-3)'}"></i></div>`;
-        return `<div class="grow">${icon('water','var(--water)')}<div class="gt"><b>Water</b><span class="muted small">${n1(t.water/1000)} of ${n1(WT/1000)} L · tap a glass to add 250 ml</span></div>${statePill(stW)}</div>
+        return `<div class="grow">${icon('water','var(--water)')}<div class="gt"><b>Water</b><span class="muted small">${fmtL(t.water)} of ${fmtL(WT)} L · tap a glass to add 250 ml</span></div>${statePill(stW)}</div>
           <div class="glasses2">${Array.from({length:glasses},(_,i)=>`<button class="gl${i<full?' on':''}" ${i<full?'disabled':'data-action="water" data-ml="250"'} aria-label="${i<full?'Glass drunk':'Add a 250 ml glass'}"><svg viewBox="0 0 24 28" aria-hidden="true"><path class="cup" d="M4 3h16l-2 21a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/><path class="fill" d="M5.4 10h13.2l-1.4 14a1.4 1.4 0 0 1-1.4 1.3H8.2a1.4 1.4 0 0 1-1.4-1.3z"/></svg></button>`).join('')}</div>
           <div class="row">${[500,750].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml} ml</button>`).join('')}${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Undo</button>`:''}</div>
           <div class="grow">${icon('steps','var(--accent)')}<div class="gt"><b>Steps</b><span class="muted small">${H.steps?n0(H.steps):'0'} of ${n0(goal)}</span></div>${statePill(stS)}</div>${bar(H.steps||0, goal, stS)}
@@ -1609,11 +1611,13 @@ function viewGym(){
 }
 
 /* ---------- Trends ---------- */
+// target: a number, or a function of the row (per-day targets rise on training days)
 function weekBars(rows, get, fmt, kind, target){
+  const tgt = r => typeof target==='function' ? target(r) : target;
   const vals = rows.map(r=>get(r)); const have = vals.filter(v=>v>0);
-  const max = Math.max(target||0, ...vals, 1)*1.05;
+  const max = Math.max(...rows.map(r=>tgt(r)||0), ...vals, 1)*1.05;
   const avg = have.length ? have.reduce((s,v)=>s+v,0)/have.length : 0;
-  return {avg, html:`<div class="wbars">${rows.map((r,i)=>{ const v=vals[i]; const h=v>0?Math.max(4, v/max*100):0; const st = goalState(v, target, kind);
+  return {avg, html:`<div class="wbars">${rows.map((r,i)=>{ const v=vals[i]; const target = tgt(r); const h=v>0?Math.max(4, v/max*100):0; const st = goalState(v, target, kind);
     return `<div class="wb" data-tip="${esc(fmtDate(r.date)+': '+(v>0?fmt(v):'nothing logged'))}"><span class="wv">${v>0?fmt(v,true):''}</span><div class="wtrack">${target?`<i class="wt" style="bottom:${target/max*100}%"></i>`:''}<i class="wfill" style="height:${h}%;background:${stBar(st)}"></i></div><span class="wd${r.date===localDate()?' now':''}">${esc(fmtDate(r.date,{weekday:'narrow'}))}</span></div>`; }).join('')}</div>`};
 }
 function viewTrends(){
@@ -1621,12 +1625,12 @@ function viewTrends(){
   const T = targets(); const goal = Number(prof().steps_goal)||10000;
   const k = v => v>=10000 ? n1(v/1000)+'k' : n0(v);
   const metrics = [
-    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'range', T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
-    ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'more', T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
+    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'range', r=>r.T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
+    ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'more', r=>r.T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
     ['Burned', r=>r.d?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'more', 0, v=>`${n0(v)} kcal`, 'resting + daily life + training'],
     ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'more', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
     ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'more', goal, v=>n0(v), `goal ${n0(goal)}`],
-    ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>s?n1(v):`${n1(v)} L`, 'more', T.water_ml/1000, v=>`${n1(v)} L`, `target ${n1(T.water_ml/1000)} L`],
+    ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>fmtL(v*1000)+(s?'':' L'), 'more', r=>waterTarget(r.d||emptyDay(r.date), r.T)/1000, v=>`${fmtL(v*1000)} L`, `target ${fmtL(T.water_ml)} L+`],
   ];
   const day = getDay(S.date), dt = dayTotals(day), DT = dayTargets(day);
   const microsHtml = `<div class="facts"><div class="dvh">% of daily target · ${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'short'}))}</div>
@@ -1669,7 +1673,8 @@ function viewTrends(){
     <div class="grid two">
     ${metrics.map(([title,get,fmt,kind,target,fmtAvg,sub])=>{ const w = weekBars(rows, get, fmt, kind, target);
       const pts = rows.map(r=>({r, v:get(r)})).filter(x=>x.v>0);
-      const score = x => kind==='range' ? -Math.abs(x.v-target) : x.v;
+      const tg = r => typeof target==='function' ? target(r) : target;
+      const score = x => kind==='range' ? -Math.abs(x.v-tg(x.r)) : x.v;
       const best = pts.length>1 ? pts.reduce((a,b)=>score(b)>score(a)?b:a) : null, worst = pts.length>1 ? pts.reduce((a,b)=>score(b)<score(a)?b:a) : null;
       const day = x => esc(fmtDate(x.r.date,{weekday:'long'}));
       return `<section class="panel wk"><div class="panel-head"><h3>${title}</h3><span class="muted small">avg ${w.avg?fmtAvg(w.avg):'—'} · ${esc(sub)}</span></div>${w.html}
@@ -1814,9 +1819,18 @@ function autoStack(){
   const p = prof(), today = localDate();
   if (!S.dbReady || S.stackAutoDate===today || p.stack_auto===false || !(p.stack||[]).length) return;
   S.stackAutoDate = today;
-  const d = getDay(today); if (d.stack_auto) return;
-  writeDay(today, d => { d.supplements = d.supplements||[]; d.stack_auto = true;
-    for (const st of p.stack) if (!d.supplements.some(x=>x.stack_id===st.id)) d.supplements.push({id:uid(), name:st.name, dose:st.dose, micros:{...st.micros}, stack_id:st.id, time:nowTime(), auto:true}); });
+  // When did each item start? Its "since" date, or the first day it appears in the log.
+  const firstSeen = st => { let d=null; for (const [k,day] of S.days) if ((day.supplements||[]).some(x=>x.stack_id===st.id || exKey(x.name)===exKey(st.name)) && (!d || k<d)) d=k; return d; };
+  const since = {}; for (const st of p.stack) since[st.id] = st.since || firstSeen(st) || today;
+  const earliest = Object.values(since).sort()[0], limit = addDays(today, -60);
+  for (let d = earliest < limit ? limit : earliest; d <= today; d = addDays(d, 1)) {
+    const day = S.days.get(d); if (day && day.stack_auto) continue; // already filled (and anything unticked stays unticked)
+    const due = p.stack.filter(st => since[st.id] <= d && !((day && day.supplements) || []).some(x=>x.stack_id===st.id));
+    if (!due.length) continue;
+    writeDay(d, dd => { dd.supplements = dd.supplements||[]; dd.stack_auto = true;
+      for (const st of due) if (!dd.supplements.some(x=>x.stack_id===st.id)) dd.supplements.push({id:uid(), name:st.name, dose:st.dose, micros:{...st.micros}, stack_id:st.id, time:nowTime(), auto:true}); });
+  }
+  if (p.stack.some(st=>!st.since)) saveProfile({...p, stack:p.stack.map(st=>({...st, since: st.since || since[st.id]}))});
 }
 
 /* ---------- Excel export ---------- */
@@ -2049,7 +2063,7 @@ document.addEventListener('click', ev => {
         if (i>=0) d.supplements.splice(i,1); else d.supplements.push({id:uid(), name:st.name, dose:st.dose, micros:{...st.micros}, stack_id:st.id, time:nowTime()}); }); break; }
     case 'addStack': { const x=(day.supplements||[]).find(y=>y.id===b.dataset.id); if(!x) break; const p=prof();
       if (findStack(x.name)) { toast(`${x.name} is already on your daily list`); break; }
-      const st={id:uid(), name:x.name, dose:x.dose, micros:{...x.micros}};
+      const st={id:uid(), name:x.name, dose:x.dose, micros:{...x.micros}, since:S.date};
       saveProfile({...p, stack:[...(p.stack||[]), st]});
       writeDay(S.date, d => { const y=(d.supplements||[]).find(z=>z.id===x.id); if (y) y.stack_id=st.id; });
       toast(`Added ${x.name} to your daily list`); break; }
