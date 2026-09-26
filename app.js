@@ -422,7 +422,7 @@ const AI_ERR = {
   session_expired:'You’ve been signed out. Sign in again, then log this entry.',
   daily_cap:'You’ve used today’s Claude allowance. The food table and saved foods still log instantly; Claude is back tomorrow.',
   not_invited:'Claude features are invite-only on this app. Ask the owner to add your email.',
-  server_config:'The app’s Claude key isn’t set up correctly. The owner needs to check the ANTHROPIC_API_KEY secret.',
+  server_config:'The app’s AI key isn’t set up correctly. The owner needs to check the GEMINI_API_KEY or ANTHROPIC_API_KEY secret.',
   unavailable:'Couldn’t reach Claude. Your entry is still here; try again.',
   offline:'You’re offline. Food-table items still log; try Claude again when you’re back online.',
   rate_limited:'Claude is busy right now. Try again in a minute.',
