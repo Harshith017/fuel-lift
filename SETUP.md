@@ -54,7 +54,7 @@ Things to know: on the free tier Google may use what you send (food logs, photos
 
 Any static host works: upload this folder.
 - **Vercel or Netlify**: drag and drop the folder, and you get a link like `fuel-lift.vercel.app`.
-- **GitHub Pages**: Settings → Pages → Deploy from a branch → `main`, `/ (root)`. It's served at `https://harshith017.github.io/fuel-lift/`.
+- **GitHub Pages**: Settings → Pages → Deploy from a branch → `main`, `/ (root)`. It's served at `https://harshith017.github.io/maxxtempo/`.
 
 Open the link on your phone, then Share → **Add to Home Screen**.
 
