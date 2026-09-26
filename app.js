@@ -1470,7 +1470,7 @@ function viewToday(){
   <div class="grid">
     <section class="panel dash" aria-label="Today at a glance">
       <div class="dgrid">
-        ${dashCell('Calories', P(t.kcal,T.kcal), `${n0(t.kcal)} / ${n0(T.kcal)} kcal`, 'var(--ink)', true)}
+        ${dashCell('Calories', P(t.kcal,T.kcal), `${n0(t.kcal)} / ${n0(T.kcal)} kcal`, 'var(--accent)', true)}
         ${dashCell('Protein', P(t.protein,T.protein), `${n0(t.protein)} / ${n0(T.protein)} g`, 'var(--protein)')}
         ${dashCell('Carbs', P(t.carbs,T.carbs), `${n0(t.carbs)} / ${n0(T.carbs)} g`, 'var(--carbs)')}
         ${dashCell('Fibre', P(t.fiber,T.fiber), `${n0(t.fiber)} / ${n0(T.fiber)} g`, 'var(--ink-2)')}
@@ -1573,7 +1573,7 @@ function viewTrends(){
   const T = targets(); const goal = Number(prof().steps_goal)||10000;
   const k = v => v>=10000 ? n1(v/1000)+'k' : n0(v);
   const metrics = [
-    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--ink-2)', T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
+    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--accent)', T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
     ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'var(--protein)', T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
     ['Burned', r=>r.d?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--carbs)', 0, v=>`${n0(v)} kcal`, 'resting + daily life + training'],
     ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'var(--fat)', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
@@ -1900,7 +1900,6 @@ function render(){
   $('#syncDot').className = 'sync ' + (S.user ? S.sync : '');
   $('#syncDot').title = {synced:'Saved', saving:'Saving…', offline:'Offline: saved on this device', error:'Sync problem: retrying'}[S.sync]||'';
   $('#dateLabel').textContent = isToday ? 'Today, ' + fmtDate(S.date,{day:'numeric',month:'short'}) : fmtDate(S.date);
-  const chip = $('#dayChip'); chip.textContent = isToday ? fmtDate(S.date,{weekday:'short',day:'numeric',month:'short'}) : fmtDate(S.date,{weekday:'short',day:'numeric',month:'short'})+' · back to today'; chip.classList.toggle('past', !isToday);
   $('#datePick').max = localDate(); $('#datePick').value = S.date;
   if (!$('#menu').hidden && $('#menuAcct')) $('#menuAcct').innerHTML = accountFold(); // leaves the password box alone
   $('#goToday').hidden = isToday;
@@ -1913,6 +1912,7 @@ function render(){
   if (S.sync==='offline') html += `<div class="banner" style="margin-bottom:16px">You’re offline. Everything you log is saved on this device and syncs when you’re back online.</div>`;
   else if (S.sync==='error') html += `<div class="banner" style="margin-bottom:16px">Couldn’t sync with the server. Your changes are safe on this device; retrying.</div>`;
   if (S.dbState==='connecting') html += `<div class="muted small" style="margin-bottom:12px">Loading your log…</div>`;
+  if (!isToday && S.view!=='setup') html += `<div class="pastbar"><span>Viewing <b>${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'short'}))}</b></span><span class="spacer"></span><button class="linkbtn" data-action="goToday">Back to today</button></div>`;
   html += S.view==='setup'&&S.setup?viewSetup():S.view==='gym'?viewGym():S.view==='trends'?viewTrends():S.view==='coach'||S.view==='health'?viewProfile():S.view==='profile'?viewProfile():viewToday();
   $('#main').innerHTML = html;
   const ta2 = $('#logText'); if (ta2) { ta2.value = draft; if (hadFocus) ta2.focus(); }
@@ -1946,6 +1946,8 @@ document.addEventListener('click', ev => {
     case 'pickPhoto': $('#photoInput').click(); break;
     case 'clearPhoto': clearPhoto(); render(); break;
     case 'goto': setView(b.dataset.view); break;
+    case 'goToday': S.date=localDate(); S.status=''; render(); break;
+    case 'theme': setTheme(b.dataset.t); break;
     case 'water': writeDay(S.date, d => d.water.push({id:uid(), ml:+b.dataset.ml, time:nowTime()})); break;
     case 'undoWater': { const last = day.water[day.water.length-1]; if (!last) break; writeDay(S.date, d=>d.water.pop()); toast(`Removed ${n0(last.ml)} ml`, () => writeDay(S.date, d=>d.water.push(last))); break; }
     case 'delFood': { const i = day.foods.findIndex(f=>f.id===b.dataset.id); if (i<0) break; const item=day.foods[i]; const date=S.date;
@@ -2069,8 +2071,20 @@ $('#prevDay').onclick = () => { S.date=addDays(S.date,-1); S.status=''; render()
 $('#nextDay').onclick = () => { if (S.date<localDate()) { S.date=addDays(S.date,1); S.status=''; render(); } };
 $('#goToday').onclick = () => { S.date=localDate(); render(); };
 $('#datePick').onchange = ev => { const v=ev.target.value; if (v && v<=localDate()) { S.date=v; S.status=''; render(); } };
+function themePref(){ try { const t=localStorage.getItem('mt:theme'); return t==='light'||t==='dark' ? t : 'auto'; } catch { return 'auto'; } }
+function setTheme(t){
+  try { if (t==='auto') localStorage.removeItem('mt:theme'); else localStorage.setItem('mt:theme', t); } catch {}
+  if (t==='auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  syncThemeColor(); if (!$('#menu').hidden) $('#menuBody').innerHTML = menuHtml(); render();
+}
+function syncThemeColor(){ const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(); const m=document.querySelector('meta[name="theme-color"]'); if (m && bg) m.content = bg; }
+syncThemeColor();
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncThemeColor); } catch {}
 function menuHtml(){
-  return `<div class="menu-sec"><div class="menu-l">Account</div><div id="menuAcct">${accountFold()}</div></div>
+  const th = themePref();
+  return `<div class="menu-sec"><div class="menu-l">Appearance</div>
+      <div class="seg" role="group" aria-label="Theme">${[['light','Light'],['dark','Dark'],['auto','Match phone']].map(([k,l])=>`<button data-action="theme" data-t="${k}" aria-pressed="${th===k}">${l}</button>`).join('')}</div></div>
+    <div class="menu-sec"><div class="menu-l">Account</div><div id="menuAcct">${accountFold()}</div></div>
     <div class="menu-sec"><div class="menu-l">Password &amp; security</div>${securityFold()}</div>`;
 }
 function setMenu(open){
@@ -2079,10 +2093,9 @@ function setMenu(open){
 }
 $('#menuBtn').onclick = () => setMenu($('#menu').hidden);
 $('#menuClose').onclick = () => setMenu(false);
-$('#dayChip').onclick = () => { if (S.date!==localDate()) { S.date=localDate(); render(); } else setMenu($('#menu').hidden); };
 // A tap outside closes the menu and nothing else: the same tap must not also press what's underneath.
 let swallowClick = false, swallowT;
-document.addEventListener('pointerdown', ev => { if (!$('#menu').hidden && !ev.target.closest('#menu,#menuBtn,#dayChip')) {
+document.addEventListener('pointerdown', ev => { if (!$('#menu').hidden && !ev.target.closest('#menu,#menuBtn')) {
   setMenu(false); swallowClick = true; clearTimeout(swallowT); swallowT = setTimeout(() => { swallowClick = false; }, 600); } }, true);
 document.addEventListener('click', ev => { if (swallowClick) { swallowClick = false; ev.preventDefault(); ev.stopPropagation(); } }, true);
 document.addEventListener('keydown', ev => { if (ev.key==='Escape' && !$('#menu').hidden) setMenu(false); });
