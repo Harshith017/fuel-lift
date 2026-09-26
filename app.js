@@ -157,7 +157,7 @@ const S = {
   reports:[], repSel:null, repMarker:null, repBusy:false, repStatus:'', reviews:[], plans:[], planBusy:false, planStatus:'', planFor:null, planNote:'', revBusy:false, revStatus:'', ideas:null, ideasBusy:false,
   queue:[], qBusy:false, qStatus:'', setup:null, setupShown:false,
   photo:null, photoUrl:null, busy:false, ctl:null, status:'', statusErr:false,
-  rev:0, sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
+  rev:0, openFolds:new Set(), sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
 };
 const prof = () => ({...DEFAULT_PROFILE, ...(S.profile||{})});
 const targets = (date) => computeTargets(prof(), date);
@@ -414,7 +414,7 @@ function supplementsPanel(day){
   if (extra.length) h += extra.map(x => `<div class="item"><div><div class="nm">${esc(x.name)}</div><div class="sub">${esc(x.dose)}${x.time?' · '+esc(x.time):''}</div></div>
     <button class="linkbtn" data-action="addStack" data-id="${x.id}">Add to daily list</button>
     <div class="acts"><button data-action="delSupp" data-id="${x.id}" aria-label="Delete ${esc(x.name)}">✕</button></div></div>`).join('');
-  if (stack.length) h += `<div class="muted small">Tap to mark taken. Their vitamins and minerals count toward the micronutrient totals below. Remove items from the daily list in Profile.</div>`;
+  if (stack.length) h += `<div class="muted small">Tap to mark taken or skip for today. Their vitamins and minerals count toward your daily totals in Trends.</div>`;
   return h;
 }
 function guessMeal(){ const h=new Date().getHours(); return h<11?'breakfast':h<16?'lunch':h<19?'snack':'dinner'; }
@@ -1277,7 +1277,7 @@ function planCard(compact){
     const pf = plan.date===today ? planFollow(plan) : null;
     body += `<div class="plan-h"><div class="rev-head">${esc(plan.focus)}</div><span class="pill ${plan.readiness==='good'?'good':plan.readiness==='low'?'bad':'warn'}">readiness ${esc(plan.readiness)}</span>${plan.duration?`<span class="muted small">~${n0(plan.duration)} min</span>`:''}${pf?`<span class="pill ${pf.ok?'good':'warn'}">${pf.ok?'done':'changed'}</span>`:''}</div>
       <div class="small">${esc(plan.why)}</div>`;
-    if (compact) body += plan.exercises.length ? `<div class="small muted">${esc(plan.exercises.map(e=>e.name).join(' · '))}</div><button class="linkbtn" data-action="goto" data-view="coach" style="align-self:flex-start;padding-left:0">See the full session in Coach</button>` : '';
+    if (compact) body += plan.exercises.length ? `<div class="small muted">${esc(plan.exercises.map(e=>e.name).join(' · '))}</div><button class="linkbtn" data-action="goto" data-view="gym" style="align-self:flex-start;padding-left:0">See the full session in Train</button>` : '';
     else {
       if (plan.warmup) body += `<div class="small"><b>Warm-up:</b> ${esc(plan.warmup)}</div>`;
       if (plan.exercises.length) body += `<div class="tablewrap"><table><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th class="r">Rest</th></tr></thead><tbody>
@@ -1292,25 +1292,6 @@ function planCard(compact){
   return `<section class="panel${compact?'':' span2'}" aria-label="Next session">${head}${body}${compact?'':controls}${compact&&!plan?controls:''}</section>`;
 }
 
-function viewCoach(){
-  const now=Date.now(); const act=[];
-  for (let i=0;i<4;i++){ const d=S.days.get(addDays(localDate(),-i)); if(!d) continue;
-    for (const a of d.sports||[]) if (a.recovery&&a.recovery.ready_at&&Date.parse(a.recovery.ready_at)>now) act.push({label:actTitle(a), date:d.date, r:a.recovery});
-    if (d.gym_recovery&&d.gym_recovery.ready_at&&Date.parse(d.gym_recovery.ready_at)>now) act.push({label:'Gym: '+(d.gym_recovery.muscles||[]).join(', '), date:d.date, r:d.gym_recovery}); }
-  const t=dayTotals(getDay(localDate())), T=dayTargets(getDay(localDate()));
-  return `<div class="grid">
-    <section class="panel"><div class="panel-head"><h2>Recovery</h2><span class="muted small">${act.length?`${act.length} still recovering`:'fresh'}</span></div>
-      ${act.length ? act.map(x=>`<div class="act"><div class="nm">${esc(x.label)} <span class="muted small">${esc(fmtDate(x.date,{weekday:'short'}))}</span></div>${recoveryHtml(x.r)}</div>`).join('')
-        : '<div class="small">Nothing is still recovering from the last few days, so you’re clear for a hard session.</div>'}
-    </section>
-    ${planCard(false)}
-    <section class="panel"><div class="panel-head"><h2>What to eat next</h2><span class="muted small">${n0(Math.max(0,T.kcal-t.kcal))} kcal · ${n0(Math.max(0,T.protein-t.protein))} g protein left today</span></div>
-      <div class="row"><button class="btn sm" data-action="ideas" ${S.ideasBusy||S.aiState==='off'?'disabled':''}>Suggest meals</button></div>
-      ${ideasHtml()}
-    </section>
-    ${reviewPanel()}
-  </div>`;
-}
 function latestWeightDate(){ let d=''; for (const [k,v] of S.days) if (v.weight_kg && k>d) d=k; return d; }
 function setStatus(msg, err=false){ S.status=msg; S.statusErr=err; const el=$('#logStatus'); if (el){ el.textContent=msg; el.classList.toggle('err',err);} }
 function clearPhoto(){ if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photo=null; S.photoUrl=null; }
@@ -1382,7 +1363,7 @@ function loggerHtml(kind){
   const ph = kind==='gym' ? 'e.g. bench 60kg 3x8, lat pulldown 50x12 x10 x10 · badminton doubles 1 hr · cricket nets 90 min, bowled 6 overs, faced 40 balls' : 'e.g. 150g chicken breast, 200g cooked rice, 1 tbsp ghee · 500ml water · bench 60kg 3x8';
   if (S.aiState==='off') return `<div class="banner">AI isn’t set up for this app yet, so typed entries only log foods from the food table. Water, editing and everything else work. See SETUP.md to connect one.</div>`;
   return `<section class="panel logger span2" aria-label="Log an entry">
-    <div class="panel-head"><h2>${kind==='gym'?'Log training':'Log it'}</h2><span class="muted small">${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'long'}))}</span></div>
+    <div class="panel-head"><h2>${kind==='gym'?'Log training':'Log food &amp; training'}</h2><span class="muted small">${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'long'}))}</span></div>
     ${queueCard()}
     <textarea id="logText" placeholder="${esc(ph)}" ${S.busy?'disabled':''}></textarea>
     <div class="row">
@@ -1396,94 +1377,6 @@ function loggerHtml(kind){
     ${kind!=='gym'&&recentFoods().length?`<div class="chips" aria-label="Recent foods"><span class="muted small" style="align-self:center">Log again:</span>${recentFoods().map(f=>`<button class="chip" style="border-style:solid" data-action="relog" data-id="${f.id}">${esc(f.name)}${f.quantity?' · '+esc(f.quantity):''}</button>`).join('')}</div>`:''}
     ${kind==='gym'||!recentFoods().length?`<div class="chips" aria-label="Examples"><span class="muted small" style="align-self:center">Try:</span>${(kind==='gym'?EXAMPLES.slice(5):EXAMPLES.slice(0,6)).map(x=>`<button class="chip" data-action="example" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}
   </section>`;
-}
-function viewToday(){
-  const day = getDay(S.date), t = dayTotals(day), T = dayTargets(day);
-  const remaining = T.kcal - t.kcal;
-  const H = day.health||{}; const B = burnedTotal(day); const bal = t.kcal - B.total;
-  const sv = H.sleep_min ? sleepVerdict(H.sleep_min, who(S.date).age) : null;
-  const byMeal = MEALS.map(m => ({m, items:(day.foods||[]).filter(f=>f.meal===m)})).filter(g=>g.items.length);
-  const WT = waterTarget(day, T);
-  const glasses = Math.max(Math.ceil(WT/250), Math.ceil(t.water/250));
-  return `${!S.profile ? `<div class="banner" style="margin-bottom:16px">Targets below use default numbers. <button class="linkbtn" data-action="goto" data-view="profile">Add your weight, height, age and goal</button> to set your own.</div>`:''}
-  ${todayBanners()}
-  <div class="grid two">
-    ${loggerHtml('today')}
-  <div class="tiles five span2">
-    <div class="tile"><span class="l">Eaten</span><span class="v">${n0(t.kcal)}</span><span class="delta flat">of ${n0(T.kcal)} kcal</span></div>
-    <div class="tile"><span class="l">Burned${B.restEst||B.actEst?' <span class="tag">est.</span>':''}</span><span class="v">${n0(B.total)}</span><span class="delta ${t.kcal?(bal>0?'up':'down'):'flat'}" style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'surplus +':'deficit −'}${n0(Math.abs(bal))} kcal`:'nothing eaten logged'}</span></div>
-    <div class="tile hs"><span class="l">Steps</span><span class="v">${H.steps?n0(H.steps):'—'}</span><span class="delta flat">goal ${n0(Number(prof().steps_goal)||10000)}</span></div>
-    <div class="tile hs"><span class="l">Sleep</span><span class="v">${H.sleep_min?fmtSleep(H.sleep_min):'—'}</span>${sv?`<span class="delta" style="color:var(--${sv.cls})">${sv.label}</span>`:'<span class="delta flat">not logged</span>'}</div>
-    ${(()=>{ const r=latestRecovery(); return `<div class="tile"><span class="l">Recovery</span><span class="v" style="font-size:24px;line-height:1.3">${!r?'—':r.recovering?esc(fmtReady(r.t)):'Ready'}</span><span class="delta flat">${!r?'log a session to see it':r.recovering?'ready for hard training':'fresh for a hard session'}</span></div>`; })()}
-  </div>
-    <section class="panel" aria-label="Food">
-      <div class="panel-head"><h2>Food</h2><span class="muted small">${(day.foods||[]).length} item${(day.foods||[]).length===1?'':'s'}</span></div>
-      ${byMeal.length ? byMeal.map(g=>`<div class="meal"><div class="meal-h"><span>${g.m}</span><span class="num">${n0(g.items.reduce((s,f)=>s+f.kcal,0))} kcal</span></div>
-        ${g.items.map(f=>`<div class="item"><div><div class="nm">${esc(f.name)} ${f.confidence!=='high'?`<span class="tag est" title="Estimated portion">est.</span>`:''}${f.source==='photo'?' <span class="tag">photo</span>':''}${f.check?' <span class="tag est" title="Calories don’t match the protein, carbs and fat. Tap Edit to check.">check</span>':''}</div>
-          <div class="sub">${esc(f.quantity||(f.grams?n0(f.grams)+' g':''))} · P ${n0(f.protein)} · C ${n0(f.carbs)} · F ${n0(f.fat)}</div></div>
-          <div class="kc">${n0(f.kcal)}</div>
-          <div class="acts"><button data-action="editFood" data-id="${f.id}" aria-label="Edit ${esc(f.name)}">Edit</button><button data-action="delFood" data-id="${f.id}" aria-label="Delete ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`).join('')
-        : `<div class="empty">Nothing logged yet. Type a meal above, like “2 eggs, 2 slices brown bread, 1 banana”.</div>`}
-    ${(day.foods||[]).length?`<label class="check muted small" style="margin-top:12px"><input type="checkbox" data-action="dayComplete" ${day.incomplete?'':'checked'}> I logged everything I ate on this day (days you untick are left out when your real maintenance is measured)</label>`:''}
-    </section>
-    <section class="panel" aria-label="Calories">
-      <div class="panel-head"><h2>Energy</h2>${day.weight_kg?`<span class="tag">Weight ${n1(day.weight_kg)} kg</span>`:''}</div>
-      <div class="energy">
-        <div><div class="big">${n0(t.kcal)}<small> / ${n0(T.kcal)}</small></div><div class="muted small">kcal eaten</div></div>
-        <div class="kv">
-          <span>${remaining>=0?'Left to eat':'Over target'}</span><b style="color:${remaining>=0?'var(--ink)':'var(--bad)'}">${n0(Math.abs(remaining))} kcal</b>
-          <span>Target today</span><b>${n0(T.base)}${T.training?` + ${n0(T.training)}`:''} kcal</b>
-          <span>Gym &amp; sport (net)</span><b>${n0(t.burned)} kcal</b>
-          ${B.hasHealth ? `<span>Resting (Apple Health)</span><b>${n0(B.resting)} kcal</b>
-          <span>Active (Apple Health${prof().watch_workouts?'':' + logged training'})</span><b>${n0(B.active)} kcal</b>`
-          : `<span>Daily life${day.date===localDate()?' so far':''} (${B.dailySource==='measured'?'measured':'est.'})</span><b>${n0(B.daily)} kcal</b>`}
-          <span>Total burned</span><b>${n0(B.total)} kcal</b>
-        </div>
-      </div>
-      ${meter(t.kcal,T.kcal,'var(--ink)',true)}
-      <div class="muted small">${T.maintSource==='measured'?`Based on your measured maintenance of ${n0(T.maint)} kcal`:`Based on an estimated maintenance of ${n0(T.maint)} kcal`}${T.goalDelta?` ${T.goalDelta<0?'−':'+'} ${n0(Math.abs(T.goalDelta))} for your goal`:''}${T.training?`, plus today’s training`:''}. ${T.floored?`Capped at a ${n0(T.floor)} kcal minimum for safety. `:''}<button class="linkbtn" data-action="goto" data-view="profile" style="padding:0">How it’s worked out</button></div>
-      ${S.aiState!=='off'&&S.date===localDate()?`<div class="row"><button class="btn ghost sm" data-action="ideas" ${S.ideasBusy?'disabled':''}>What should I eat next?</button></div>${ideasHtml()}`:''}
-      <div class="macros">
-        ${[['Protein','protein','var(--protein)'],['Carbs','carbs','var(--carbs)'],['Fat','fat','var(--fat)']].map(([l,k,c])=>`
-          <div class="macro"><span class="lbl"><span class="swatch" style="background:${c}"></span>${l}</span>${meter(t[k],T[k],c)}<span class="v">${n0(t[k])} / ${n0(T[k])} g</span></div>`).join('')}
-        <div class="macro"><span class="lbl muted">Fibre</span>${meter(t.fiber,T.fiber,'var(--ink-2)')}<span class="v">${n0(t.fiber)} / ${n0(T.fiber)} g</span></div>
-        <div class="macro"><span class="lbl muted">Sugar</span>${meter(t.sugar,T.sugar,'var(--ink-2)',true)}<span class="v">${n0(t.sugar)} / ≤${n0(T.sugar)} g</span></div>
-      </div>
-    </section>
-    <section class="panel" aria-label="Water">
-      <div class="panel-head"><h2>Water</h2><span class="muted small">Target ${n1(WT/1000)} L${WT>T.water_ml?' incl. training':''}</span></div>
-      <div class="water-top"><span class="big num" style="color:var(--water)">${n1(t.water/1000)}</span><span class="muted">litres · ${Math.round(pct(t.water,WT))}%</span></div>
-      <div class="glasses" aria-hidden="true">${Array.from({length:glasses},(_,i)=>`<span class="glass${i<Math.floor(t.water/250)?' on':''}"></span>`).join('')}</div>
-      <div class="row">${[250,500,750,1000].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml>=1000?'1 L':ml+' ml'}</button>`).join('')}
-        ${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Remove last</button>`:''}</div>
-    </section>
-    <section class="panel" aria-label="Sleep and activity">
-      <div class="panel-head"><h2>Sleep &amp; steps</h2><span class="muted small">from Apple Health</span></div>
-      ${healthPanel(H)}
-    </section>
-    <section class="panel" aria-label="Supplements">
-      <div class="panel-head"><h2>Supplements</h2><span class="muted small">${(day.supplements||[]).length} taken</span></div>
-      ${supplementsPanel(day)}
-    </section>
-    <section class="panel" aria-label="Activity">
-      <div class="panel-head"><h2>Activity</h2>${t.burned?`<span class="muted small num">${n0(t.burned)} kcal</span>`:''}</div>
-      ${activityPanel(day)}
-    </section>
-    <details class="panel span2 micros" aria-label="Micronutrients">
-      <summary><h2>Vitamins &amp; minerals</h2><span class="muted small">${(()=>{ const low=MICROS.filter(m=>m.kind!=='limit'&&T.micros[m.key]&&t.micros[m.key]/T.micros[m.key]<0.5).length, over=MICROS.filter(m=>m.kind==='limit'&&T.micros[m.key]&&t.micros[m.key]>T.micros[m.key]).length; return [low?`${low} low`:'', over?`${over} over limit`:''].filter(Boolean).join(' · ')||'Show'; })()}</span></summary>
-      <div class="facts">
-        <div class="fh">Micronutrients &amp; limits</div>
-        <div class="dvh">% of daily target</div>
-        <div class="grid two" style="gap:0 24px">
-        ${MICROS.map(m=>{ const v=t.micros[m.key], tg=T.micros[m.key]; const p=tg?v/tg*100:0; const lim=m.kind==='limit';
-          const cls = lim ? (p>100?'over':'') : (p>=100?'':p<50?'low':'');
-          return `<div class="fr"><b>${m.label}${lim?' <span class="muted small">(limit)</span>':''}${(T.focus||[]).includes(m.key)?' <span class="tag est">blood test</span>':''}</b><span class="amt">${fmtAmt(v,m.unit)} ${m.unit}</span><span class="dv ${cls}">${Math.round(p)}%</span>
-            <div class="bar"><i class="${lim&&p>100?'over':!lim&&p>=100?'done':''}" style="width:${Math.min(100,p)}%"></i></div></div>`; }).join('')}
-        </div>
-      </div>
-      <div class="muted small">Targets are adult daily reference intakes for your sex. Values are estimates from food composition tables, so read them as a guide rather than a lab result.</div>
-    </details>
-  </div>`;
 }
 function healthPanel(H){
   const p = prof(); const goal = Number(p.steps_goal)||10000;
@@ -1516,47 +1409,6 @@ function exerciseList(day){
     <div class="kc">${n0(e.kcal)}<span class="muted small"> kcal</span></div>
     <div class="acts"><button data-action="editEx" data-id="${e.id}" aria-label="Edit ${esc(e.name)}">Edit</button><button data-action="delEx" data-id="${e.id}" aria-label="Delete ${esc(e.name)}">✕</button></div></div>`).join('');
 }
-function viewGym(){
-  const {cur,prev,label} = periodRanges(S.date, S.gymPeriod);
-  const a = periodStats(...cur), b = periodStats(...prev);
-  const sessions = [...buildSessions().values()];
-  const rows = sessions.map(e => {
-    const inR = (r) => e.sessions.filter(s=>s.date>=r[0]&&s.date<=r[1]);
-    const c = inR(cur), p = inR(prev);
-    const bc = c.length?Math.max(...c.map(s=>s.best)):0, bp = p.length?Math.max(...p.map(s=>s.best)):0;
-    const last = e.sessions[e.sessions.length-1];
-    const bw = last.bodyweight;
-    return {e, last, bc, bp, bw, allBest:Math.max(...e.sessions.map(s=>s.best))};
-  }).sort((x,y)=> y.last.date.localeCompare(x.last.date) || x.e.name.localeCompare(y.e.name));
-  if (S.gymEx && !rows.find(r=>r.e.key===S.gymEx)) S.gymEx=null;
-  if (!S.gymEx && rows.length) S.gymEx = rows[0].e.key;
-  const sel = rows.find(r=>r.e.key===S.gymEx);
-  return `<div class="grid">
-    ${loggerHtml('gym')}
-    ${planCard(true)}
-    <div class="panel-head"><h2>${S.gymPeriod==='week'?'This week':'This month'}</h2>
-      <div class="seg" role="group" aria-label="Period"><button data-action="gymPeriod" data-p="week" aria-pressed="${S.gymPeriod==='week'}">Week</button><button data-action="gymPeriod" data-p="month" aria-pressed="${S.gymPeriod==='month'}">Month</button></div></div>
-    <div class="tiles">
-      <div class="tile"><span class="l">Days trained</span><span class="v">${a.days}</span>${delta(a.days,b.days)}</div>
-      <div class="tile"><span class="l">Working sets</span><span class="v">${a.sets}</span>${delta(a.sets,b.sets)}</div>
-      <div class="tile"><span class="l">Volume lifted</span><span class="v">${n0(a.volume)}<span class="muted" style="font-size:16px"> kg</span></span>${delta(a.volume,b.volume)}</div>
-      <div class="tile"><span class="l">Training kcal</span><span class="v">${n0(a.kcal)}</span>${delta(a.kcal,b.kcal)}</div>
-    </div>
-    <div class="muted small">Changes compare ${S.gymPeriod==='week'?'this week so far':'this month so far'} with all of ${label}. Volume = weight × reps across every set.</div>
-    ${loadPanel()}
-    ${sportSummary(a,b,label)}
-    <section class="panel" aria-label="Exercises">
-      <div class="panel-head"><h2>Gym exercises</h2><span class="muted small">Tap one to see its progress</span></div>
-      ${rows.length ? `<div class="tablewrap"><table><thead><tr><th class="l">Exercise</th><th>Last session</th><th class="r">Best est. 1RM</th><th class="r">vs ${label}</th></tr></thead><tbody>
-        ${rows.map(r=>`<tr class="click${r.e.key===S.gymEx?' sel':''}" data-action="pickEx" data-key="${esc(r.e.key)}" tabindex="0"><td class="l"><b>${esc(r.e.name)}</b> <span class="muted small">${esc(r.e.group||'')}</span></td>
-          <td>${esc(fmtDate(r.last.date,{day:'numeric',month:'short'}))} · ${r.last.sets.length} sets</td>
-          <td class="r">${r.bw ? n0(r.allBest)+' reps' : n1(r.allBest)+' kg'}</td>
-          <td class="r">${r.bc&&r.bp ? delta(r.bc,r.bp) : r.bc ? '<span class="delta flat">new</span>' : '<span class="delta flat">—</span>'}</td></tr>`).join('')}
-      </tbody></table></div>` : `<div class="empty">Log a workout above and your exercises will show up here with their progress.</div>`}
-    </section>
-    ${sel ? exerciseDetail(sel) : ''}
-  </div>`;
-}
 function sportSummary(a,b,label){
   const names = [...new Set([...Object.keys(a.sp), ...Object.keys(b.sp)])];
   if (!names.length) return `<section class="panel" aria-label="Sport"><div class="panel-head"><h2>Sport</h2></div><div class="empty">No badminton or cricket logged in this period or ${esc(label)}. Log a session above, e.g. “badminton singles 45 min”.</div></section>`;
@@ -1585,98 +1437,361 @@ function exerciseDetail(r){
     <div class="muted small">${bw?'':'Estimated 1RM uses the Epley formula: weight × (1 + reps ÷ 30). It lets sets with different reps be compared.'}</div>
   </section>`;
 }
-function viewTrends(){
-  const n = S.trendRange; const T = targets();
-  const rows = Array.from({length:n},(_,i)=>{ const date=addDays(S.date, i-n+1); const d=S.days.get(date); const t=d?dayTotals(d):null; return {date, d, t}; });
-  const logged = rows.filter(r=>r.t&&(r.t.kcal>0));
-  const avg = k => logged.length ? logged.reduce((s,r)=>s+r.t[k],0)/logged.length : 0;
-  const water = rows.filter(r=>r.t&&r.t.water>0); const avgW = water.length? water.reduce((s,r)=>s+r.t.water,0)/water.length:0;
-  const weights = rows.filter(r=>r.d&&r.d.weight_kg);
-  return `<div class="grid">
-    <div class="panel-head"><h2>Last ${n} days</h2>
-      <div class="seg" role="group" aria-label="Range">${[7,30,90].map(k=>`<button data-action="range" data-n="${k}" aria-pressed="${n===k}">${k} days</button>`).join('')}</div></div>
-    <div class="tiles">
-      <div class="tile"><span class="l">Avg kcal eaten</span><span class="v">${n0(avg('kcal'))}</span><span class="delta flat">target ${n0(T.kcal)}</span></div>
-      <div class="tile"><span class="l">Avg protein</span><span class="v">${n0(avg('protein'))}<span class="muted" style="font-size:16px"> g</span></span><span class="delta flat">target ${n0(T.protein)} g</span></div>
-      <div class="tile"><span class="l">Avg water</span><span class="v">${n1(avgW/1000)}<span class="muted" style="font-size:16px"> L</span></span><span class="delta flat">target ${n1(T.water_ml/1000)} L</span></div>
-      <div class="tile"><span class="l">Days logged</span><span class="v">${logged.length}<span class="muted" style="font-size:16px"> / ${n}</span></span><span class="delta flat">averages use logged days</span></div>
-    </div>
-    <div class="grid two">
-      <section class="panel"><div class="panel-head"><h3>Calories eaten</h3><span class="muted small">kcal per day</span></div>${barChart({rows:rows.map(r=>({date:r.date,v:r.t?r.t.kcal:0})),target:T.kcal,color:'var(--ink-2)',unit:'kcal',label:'Eaten'})}</section>
-      <section class="panel"><div class="panel-head"><h3>Protein</h3><span class="muted small">grams per day</span></div>${barChart({rows:rows.map(r=>({date:r.date,v:r.t?r.t.protein:0})),target:T.protein,color:'var(--protein)',unit:'g',label:'Protein'})}</section>
-      <section class="panel"><div class="panel-head"><h3>Sleep</h3><span class="muted small">hours per night</span></div>${barChart({rows:rows.map(r=>({date:r.date,v:r.d&&r.d.health&&r.d.health.sleep_min?Math.round(r.d.health.sleep_min/6)/10:0})),target:7,color:'var(--fat)',unit:'h',label:'Asleep'})}</section>
-      <section class="panel"><div class="panel-head"><h3>Steps</h3><span class="muted small">per day</span></div>${barChart({rows:rows.map(r=>({date:r.date,v:r.d&&r.d.health&&r.d.health.steps||0})),target:Number(prof().steps_goal)||10000,color:'var(--water)',unit:'steps',label:'Steps'})}</section>
-      ${weights.length>1?(()=>{ const tr=new Map(trendPoints().map(x=>[x.date,x.trend]));
-        return `<section class="panel"><div class="panel-head"><h3>Body weight</h3><span class="muted small">kg · line = trend</span></div>${lineChart({pts:weights.map(r=>({date:r.date,v:tr.get(r.date)??r.d.weight_kg,raw:r.d.weight_kg,tip:`${n1(r.d.weight_kg)} kg weighed · trend ${n1(tr.get(r.date)??r.d.weight_kg)} kg`})),unit:'kg',color:'var(--water)'})}
-        <div class="muted small">Daily weight swings 1–2 kg with water and food. The line is the smoothed trend, which is what targets use. Dots are single weigh-ins.</div></section>`; })():''}
-    </div>
-    ${maintenancePanel()}
-    ${(prof().stack||[]).length ? `<section class="panel"><div class="panel-head"><h3>Supplements taken</h3><span class="muted small">days out of ${n}</span></div>
-      <div class="macros">${prof().stack.map(st => { const c = rows.filter(r=>r.d&&(r.d.supplements||[]).some(x=>x.stack_id===st.id||exKey(x.name)===exKey(st.name))).length;
-        return `<div class="macro" style="grid-template-columns:minmax(90px,160px) 1fr 70px"><span class="lbl">${esc(st.name)}</span>${meter(c,n,'var(--good)')}<span class="v">${c} / ${n}</span></div>`; }).join('')}</div></section>` : ''}
-    <section class="panel"><div class="panel-head"><h3>Day by day</h3></div>
-      <div class="tablewrap"><table><thead><tr><th class="l">Day</th><th class="r">Eaten</th><th class="r">Burned</th><th class="r">Protein</th><th class="r">Carbs</th><th class="r">Fat</th><th class="r">Water</th><th class="r">Sleep</th><th class="r">Steps</th><th class="r">Weight</th></tr></thead><tbody>
-      ${rows.slice().reverse().filter(r=>r.d).map(r=>`<tr class="click" data-action="openDay" data-date="${r.date}"><td class="l">${esc(fmtDate(r.date))}</td><td class="r">${n0(r.t.kcal)}</td><td class="r">${n0(burnedTotal(r.d).total)}</td><td class="r">${n0(r.t.protein)} g</td><td class="r">${n0(r.t.carbs)} g</td><td class="r">${n0(r.t.fat)} g</td><td class="r">${n1(r.t.water/1000)} L</td><td class="r">${r.d.health&&r.d.health.sleep_min?fmtSleep(r.d.health.sleep_min):'—'}</td><td class="r">${r.d.health&&r.d.health.steps?n0(r.d.health.steps):'—'}</td><td class="r">${r.d.weight_kg?n1(r.d.weight_kg)+' kg':'—'}</td></tr>`).join('') || `<tr><td class="l muted" colspan="10">No days logged in this range yet.</td></tr>`}
-      </tbody></table></div></section>
+/* ---------- shared bits for the new layout ---------- */
+// A row that folds open. Open state survives re-renders (S.openFolds).
+function fold(key, title, sub, body){
+  return `<details class="fold" data-fold="${esc(key)}" ${S.openFolds.has(key)?'open':''}><summary><span class="ttl">${title}</span>${sub?`<span class="muted small sub">${sub}</span>`:''}</summary><div class="fold-body">${body}</div></details>`;
+}
+function spark(vals, color){
+  const v = vals.filter(x=>Number.isFinite(x)); if (v.length<2) return '';
+  const W=90, H=26, lo=Math.min(...v), hi=Math.max(...v), r=hi-lo||1;
+  const pts = v.map((x,i)=>`${(i/(v.length-1)*(W-4)+2).toFixed(1)},${(H-3-(x-lo)/r*(H-6)).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function dashCell(label, pctV, value, color, limit=false, extra=''){
+  const over = limit && pctV>100;
+  return `<div class="dcell"><span class="l">${label}</span><span class="p${over?' bad':''}">${Math.round(pctV)}<small>%</small></span>
+    <div class="meter${over?' over':''}"><i style="width:${Math.min(100,pctV)}%;${over?'':`background:${color}`}"></i></div><span class="val">${value}</span>${extra}</div>`;
+}
+
+/* ---------- Today ---------- */
+function viewToday(){
+  const day = getDay(S.date), t = dayTotals(day), T = dayTargets(day);
+  const H = day.health||{}; const B = burnedTotal(day); const bal = t.kcal - B.total;
+  const sv = H.sleep_min ? sleepVerdict(H.sleep_min, who(S.date).age) : null;
+  const byMeal = MEALS.map(m => ({m, items:(day.foods||[]).filter(f=>f.meal===m)})).filter(g=>g.items.length);
+  const WT = waterTarget(day, T), goal = Number(prof().steps_goal)||10000;
+  const P = (v,tg) => tg>0 ? v/tg*100 : 0;
+  const hasTraining = (day.sports||[]).length || (day.exercises||[]).length;
+  return `${!S.profile ? `<div class="banner" style="margin-bottom:16px">Targets below use default numbers. <button class="linkbtn" data-action="goto" data-view="profile">Add your weight, height, age and goal</button> to set your own.</div>`:''}
+  ${todayBanners()}
+  <div class="grid">
+    <section class="panel dash" aria-label="Today at a glance">
+      <div class="dgrid">
+        ${dashCell('Calories', P(t.kcal,T.kcal), `${n0(t.kcal)} / ${n0(T.kcal)} kcal`, 'var(--ink)', true)}
+        ${dashCell('Protein', P(t.protein,T.protein), `${n0(t.protein)} / ${n0(T.protein)} g`, 'var(--protein)')}
+        ${dashCell('Carbs', P(t.carbs,T.carbs), `${n0(t.carbs)} / ${n0(T.carbs)} g`, 'var(--carbs)')}
+        ${dashCell('Fibre', P(t.fiber,T.fiber), `${n0(t.fiber)} / ${n0(T.fiber)} g`, 'var(--ink-2)')}
+        ${dashCell('Sugar', P(t.sugar,T.sugar), `${n0(t.sugar)} / ≤${n0(T.sugar)} g`, 'var(--ink-2)', true)}
+        <div class="dcell"><span class="l">Burned</span><span class="p">${n0(B.total)}</span><span class="val">kcal${B.restEst||B.actEst?' (est.)':''}${t.burned?` · ${n0(t.burned)} training`:''}</span>
+          <span class="val" style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'surplus +':'deficit −'}${n0(Math.abs(bal))}`:''}</span></div>
+      </div>
+    </section>
+    ${loggerHtml('today')}
+    <section class="panel" aria-label="Food">
+      <div class="panel-head"><h2>Food</h2><span class="muted small">${(day.foods||[]).length} item${(day.foods||[]).length===1?'':'s'} · ${n0(t.kcal)} kcal</span></div>
+      ${byMeal.length ? byMeal.map(g=>`<div class="meal"><div class="meal-h"><span>${g.m}</span><span class="num">${n0(g.items.reduce((s,f)=>s+f.kcal,0))} kcal</span></div>
+        ${g.items.map(f=>`<div class="item"><div><div class="nm">${esc(f.name)} ${f.confidence!=='high'?`<span class="tag est" title="Estimated portion">est.</span>`:''}${f.source==='photo'?' <span class="tag">photo</span>':''}${f.check?' <span class="tag est" title="Calories don’t match the protein, carbs and fat. Tap Edit to check.">check</span>':''}</div>
+          <div class="sub">${esc(f.quantity||(f.grams?n0(f.grams)+' g':''))} · P ${n0(f.protein)} · C ${n0(f.carbs)} · F ${n0(f.fat)}</div></div>
+          <div class="kc">${n0(f.kcal)}</div>
+          <div class="acts"><button data-action="editFood" data-id="${f.id}" aria-label="Edit ${esc(f.name)}">Edit</button><button data-action="delFood" data-id="${f.id}" aria-label="Delete ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`).join('')
+        : `<div class="empty">Nothing logged yet. Type a meal above, like “2 eggs, 2 slices brown bread, 1 banana”.</div>`}
+      ${(day.foods||[]).length?`<label class="check muted small" style="margin-top:12px"><input type="checkbox" data-action="dayComplete" ${day.incomplete?'':'checked'}> I logged everything I ate on this day (days you untick are left out when your real maintenance is measured)</label>`:''}
+    </section>
+    <section class="panel" aria-label="Training">
+      <div class="panel-head"><h2>Training</h2>${t.burned?`<span class="muted small num">${n0(t.burned)} kcal</span>`:''}</div>
+      ${hasTraining ? activityPanel(day) : `<div class="empty">No training logged. Type it in the box above, like “bench 60kg 3x8, squat 80x5 x5 x5” or “badminton doubles 1 hr”.</div>`}
+    </section>
+    <section class="panel" aria-label="Water, steps and sleep">
+      <div class="dgrid three">
+        <div class="dcell"><span class="l">Water</span><span class="p" style="color:var(--water)">${Math.round(P(t.water,WT))}<small>%</small></span>
+          <div class="meter"><i style="width:${Math.min(100,P(t.water,WT))}%;background:var(--water)"></i></div><span class="val">${n1(t.water/1000)} / ${n1(WT/1000)} L</span></div>
+        <div class="dcell"><span class="l">Steps</span><span class="p">${H.steps?Math.round(P(H.steps,goal)):'—'}${H.steps?'<small>%</small>':''}</span>
+          <div class="meter"><i style="width:${Math.min(100,P(H.steps||0,goal))}%;background:var(--water)"></i></div><span class="val">${H.steps?n0(H.steps):'0'} / ${n0(goal)}</span></div>
+        <div class="dcell"><span class="l">Sleep</span><span class="p">${H.sleep_min?fmtSleep(H.sleep_min).replace(' ','<small> </small>'):'—'}</span>
+          <span class="val"${sv?` style="color:var(--${sv.cls})"`:''}>${sv?sv.label:'not logged'}</span></div>
+      </div>
+      <div class="row">${[250,500,750].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml} ml</button>`).join('')}
+        ${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Undo</button>`:''}</div>
+      ${!H.steps&&!H.sleep_min?`<div class="muted small">Add steps and sleep by typing “slept 7h 10m, 9200 steps” in the log box, or a screenshot of your Health app.</div>`:''}
+    </section>
   </div>`;
 }
-function viewProfile(){
-  const p = prof(), T = targets(), SG = suggestedTargets();
+
+/* ---------- Train ---------- */
+function exerciseRows(){
+  return [...buildSessions().values()].map(e => {
+    const last = e.sessions[e.sessions.length-1];
+    const cutoff = addDays(last.date, -28);
+    const base = [...e.sessions].reverse().find(s=>s.date<=cutoff) || e.sessions[0];
+    return {e, last, bw:last.bodyweight, allBest:Math.max(...e.sessions.map(s=>s.best)), base};
+  }).sort((x,y)=> y.last.date.localeCompare(x.last.date) || x.e.name.localeCompare(y.e.name));
+}
+function growthDash(rows){
+  if (!rows.length) return `<section class="panel" aria-label="Gym progress"><div class="panel-head"><h2>Gym progress</h2></div>
+    <div class="empty">Log a workout on Today, like “bench 60kg 3x8”. Each exercise then shows here with how much stronger you’re getting.</div></section>`;
+  const shown = S.allEx ? rows : rows.slice(0,6);
+  const month = addDays(localDate(), -30);
+  const prs = rows.filter(r => r.e.sessions.length>1 && r.last.date>=month && r.last.best>=r.allBest && r.last.best>Math.max(...r.e.sessions.slice(0,-1).map(s=>s.best))).length;
+  const up = rows.filter(r => r.base!==r.last && r.last.best>r.base.best).length;
+  return `<section class="panel" aria-label="Gym progress"><div class="panel-head"><h2>Gym progress</h2><span class="muted small">${rows.length} exercise${rows.length===1?'':'s'}</span></div>
+    <div class="row"><span class="pill good">${up} getting stronger</span>${prs?`<span class="pill">${prs} new best${prs===1?'':'s'} this month</span>`:''}</div>
+    <div class="exgrid">${shown.map(r => { const ch = r.base!==r.last && r.base.best ? (r.last.best-r.base.best)/r.base.best*100 : null;
+      return `<button class="excell${r.e.key===S.gymEx?' sel':''}" data-action="pickEx" data-key="${esc(r.e.key)}">
+        <span class="nm">${esc(r.e.name)}</span>
+        <span class="v">${r.bw?`${n0(r.last.best)} <small>reps</small>`:`${n1(r.last.best)} <small>kg</small>`}</span>
+        <span class="muted small">${r.bw?'most reps':'est. 1RM'} · ${esc(fmtDate(r.last.date,{day:'numeric',month:'short'}))}</span>
+        <span class="delta ${ch===null?'flat':ch>0.5?'up':ch<-0.5?'down':'flat'}">${ch===null?'first session':`${ch>0?'+':''}${n1(ch)}% ${r.base.date<=addDays(r.last.date,-28)?'vs 4 wks ago':`since ${esc(fmtDate(r.base.date,{day:'numeric',month:'short'}))}`}`}</span>
+        ${spark(r.e.sessions.slice(-10).map(s=>s.best), 'var(--protein)')}</button>`; }).join('')}</div>
+    ${rows.length>6?`<button class="linkbtn" data-action="allEx" style="align-self:flex-start;padding-left:0">${S.allEx?'Show fewer':`Show all ${rows.length} exercises`}</button>`:''}
+    <div class="muted small">Tap an exercise for its full chart. Est. 1RM = weight × (1 + reps ÷ 30), so sets with different reps compare fairly.</div>
+  </section>`;
+}
+function viewGym(){
+  const {cur,prev,label} = periodRanges(S.date, S.gymPeriod);
+  const a = periodStats(...cur), b = periodStats(...prev);
+  const rows = exerciseRows();
+  if (S.gymEx && !rows.find(r=>r.e.key===S.gymEx)) S.gymEx=null;
+  const sel = rows.find(r=>r.e.key===S.gymEx);
+  return `<div class="grid">
+    ${growthDash(rows)}
+    ${sel ? exerciseDetail(sel) : ''}
+    <div class="panel-head"><h2>${S.gymPeriod==='week'?'This week':'This month'}</h2>
+      <div class="seg" role="group" aria-label="Period"><button data-action="gymPeriod" data-p="week" aria-pressed="${S.gymPeriod==='week'}">Week</button><button data-action="gymPeriod" data-p="month" aria-pressed="${S.gymPeriod==='month'}">Month</button></div></div>
+    <div class="tiles">
+      <div class="tile"><span class="l">Days trained</span><span class="v">${a.days}</span>${delta(a.days,b.days)}</div>
+      <div class="tile"><span class="l">Working sets</span><span class="v">${a.sets}</span>${delta(a.sets,b.sets)}</div>
+      <div class="tile"><span class="l">Volume lifted</span><span class="v">${n0(a.volume)}<span class="muted" style="font-size:16px"> kg</span></span>${delta(a.volume,b.volume)}</div>
+      <div class="tile"><span class="l">Training kcal</span><span class="v">${n0(a.kcal)}</span>${delta(a.kcal,b.kcal)}</div>
+    </div>
+    <div class="muted small">Changes compare ${S.gymPeriod==='week'?'this week so far':'this month so far'} with all of ${label}. Volume = weight × reps across every set.</div>
+    ${loadPanel()}
+    ${planCard(false)}
+  </div>`;
+}
+
+/* ---------- Trends ---------- */
+function weekBars(rows, get, fmt, color, target, higherIsGood=true){
+  const vals = rows.map(r=>get(r)); const have = vals.filter(v=>v>0);
+  const max = Math.max(target||0, ...vals, 1)*1.05;
+  const avg = have.length ? have.reduce((s,v)=>s+v,0)/have.length : 0;
+  return {avg, html:`<div class="wbars">${rows.map((r,i)=>{ const v=vals[i]; const h=v>0?Math.max(4, v/max*100):0; const hit = target? (higherIsGood ? v>=target*0.9 : v<=target) : true;
+    return `<div class="wb" data-tip="${esc(fmtDate(r.date)+': '+(v>0?fmt(v):'nothing logged'))}"><span class="wv">${v>0?fmt(v,true):''}</span><div class="wtrack">${target?`<i class="wt" style="bottom:${target/max*100}%"></i>`:''}<i class="wfill" style="height:${h}%;background:${v>0&&!hit&&target?'var(--ink-3)':color}"></i></div><span class="wd${r.date===localDate()?' now':''}">${esc(fmtDate(r.date,{weekday:'narrow'}))}</span></div>`; }).join('')}</div>`};
+}
+function viewTrends(){
+  const rows = Array.from({length:7},(_,i)=>{ const date=addDays(S.date, i-6); const d=S.days.get(date); return {date, d, t:d?dayTotals(d):null, T:d?dayTargets(d):targets(date)}; });
+  const T = targets(); const goal = Number(prof().steps_goal)||10000;
+  const k = v => v>=10000 ? n1(v/1000)+'k' : n0(v);
+  const metrics = [
+    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--ink-2)', T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
+    ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'var(--protein)', T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
+    ['Burned', r=>r.d?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--carbs)', 0, v=>`${n0(v)} kcal`, 'resting + daily life + training'],
+    ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'var(--fat)', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
+    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'var(--water)', goal, v=>n0(v), `goal ${n0(goal)}`],
+    ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>s?n1(v):`${n1(v)} L`, 'var(--water)', T.water_ml/1000, v=>`${n1(v)} L`, `target ${n1(T.water_ml/1000)} L`],
+  ];
+  const day = getDay(S.date), dt = dayTotals(day), DT = dayTargets(day);
+  const microsHtml = `<div class="facts"><div class="dvh">% of daily target · ${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'short'}))}</div>
+      <div class="grid two" style="gap:0 24px">
+      ${MICROS.map(m=>{ const v=dt.micros[m.key], tg=DT.micros[m.key]; const p=tg?v/tg*100:0; const lim=m.kind==='limit';
+        const cls = lim ? (p>100?'over':'') : (p>=100?'':p<50?'low':'');
+        return `<div class="fr"><b>${m.label}${lim?' <span class="muted small">(limit)</span>':''}${(DT.focus||[]).includes(m.key)?' <span class="tag est">blood test</span>':''}</b><span class="amt">${fmtAmt(v,m.unit)} ${m.unit}</span><span class="dv ${cls}">${Math.round(p)}%</span>
+          <div class="bar"><i class="${lim&&p>100?'over':!lim&&p>=100?'done':''}" style="width:${Math.min(100,p)}%"></i></div></div>`; }).join('')}
+      </div></div>
+    <div class="muted small">Includes your supplements. Targets are adult daily reference intakes for your sex; values are estimates from food tables, so read them as a guide.</div>`;
+  const low = MICROS.filter(m=>m.kind!=='limit'&&DT.micros[m.key]&&dt.micros[m.key]/DT.micros[m.key]<0.5).length;
+  // targets reached, day by day
+  const checks = [
+    ['Calories on target', r=>r.t&&r.t.kcal ? Math.abs(r.t.kcal-r.T.kcal)<=r.T.kcal*0.1 : null],
+    ['Protein', r=>r.t&&r.t.kcal ? r.t.protein>=r.T.protein*0.9 : null],
+    ['Fibre', r=>r.t&&r.t.kcal ? r.t.fiber>=r.T.fiber*0.9 : null],
+    ['Sugar under limit', r=>r.t&&r.t.kcal ? r.t.sugar<=r.T.sugar : null],
+    ['Water', r=>r.t&&r.t.water ? r.t.water>=waterTarget(r.d,r.T) : null],
+    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps ? r.d.health.steps>=goal : null],
+    ['Sleep 7 h+', r=>r.d&&r.d.health&&r.d.health.sleep_min ? r.d.health.sleep_min>=420 : null],
+  ];
+  const hits = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)===true).length,0), tries = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)!==null).length,0);
+  const targetsHtml = `<div class="tablewrap"><table class="hits"><thead><tr><th class="l"></th>${rows.map(r=>`<th>${esc(fmtDate(r.date,{weekday:'narrow'}))}</th>`).join('')}<th class="r">Hit</th></tr></thead><tbody>
+    ${checks.map(([l,f])=>{ const res=rows.map(f); return `<tr><td class="l">${l}</td>${res.map(x=>`<td>${x===null?'<span class="muted">·</span>':x?'<span class="ok">✓</span>':'<span class="no">✕</span>'}</td>`).join('')}<td class="r">${res.filter(x=>x===true).length}/${res.filter(x=>x!==null).length}</td></tr>`; }).join('')}
+    </tbody></table></div><div class="muted small">✓ reached · ✕ missed · dot = not logged. Calories count as on target within 10%.</div>`;
+  const actDays = rows.slice().reverse().filter(r=>r.d&&((r.d.sports||[]).length||(r.d.exercises||[]).length));
+  const activityHtml = actDays.length ? actDays.map(r=>`<h3>${esc(fmtDate(r.date,{weekday:'long',day:'numeric',month:'short'}))}</h3>${activityPanel(r.d)}`).join('') : '<div class="empty">No gym or sport logged in these 7 days.</div>';
+  const actCount = actDays.reduce((s,r)=>s+(r.d.sports||[]).length+((r.d.exercises||[]).length?1:0),0);
+  const {cur,prev,label} = periodRanges(S.date, 'week'); const a = periodStats(...cur), b = periodStats(...prev);
+  const sportKcal = Object.values(a.sp).reduce((s,x)=>s+x.kcal,0);
+  const weights = rows.filter(r=>r.d&&r.d.weight_kg);
+  const trendsW = (()=>{ const pts=trendPoints().slice(-30); if (pts.length<2) return '<div class="muted small">Log your weight a few times (type “weight 72.4”) to see your trend.</div>';
+    return lineChart({pts:pts.map(x=>({date:x.date, v:x.trend, raw:x.kg, tip:`trend ${n1(x.trend)} kg`})), unit:'kg', color:'var(--water)'}) + '<div class="muted small">The line is your smoothed weight trend, which your targets use. Daily weigh-ins swing 1–2 kg with water and food.</div>'; })();
+  return `<div class="grid">
+    <div class="panel-head"><h2>Last 7 days</h2><span class="muted small">${esc(fmtDate(rows[0].date,{day:'numeric',month:'short'}))} – ${esc(fmtDate(rows[6].date,{day:'numeric',month:'short'}))}</span></div>
+    <div class="grid two">
+    ${metrics.map(([title,get,fmt,color,target,fmtAvg,sub])=>{ const w = weekBars(rows, get, fmt, color, target, title!=='Burned');
+      return `<section class="panel wk"><div class="panel-head"><h3>${title}</h3><span class="muted small">avg ${w.avg?fmtAvg(w.avg):'—'} · ${esc(sub)}</span></div>${w.html}</section>`; }).join('')}
+    </div>
+    <section class="panel folds">
+      ${fold('t-micros', 'Vitamins &amp; minerals', low?`${low} low today`:'', microsHtml)}
+      ${fold('t-activity', 'Activity', `${actCount} session${actCount===1?'':'s'}`, activityHtml)}
+      ${fold('t-targets', 'Daily targets reached', tries?`${hits} of ${tries}`:'', targetsHtml)}
+      ${fold('t-sports', 'Sports played', sportKcal?`${n0(sportKcal)} kcal this week`:'', sportSummary(a,b,label))}
+      ${fold('t-weight', 'Body weight &amp; maintenance', weights.length?`${n1(weights[weights.length-1].d.weight_kg)} kg`:'', trendsW + maintenancePanel())}
+    </section>
+  </div>`;
+}
+
+/* ---------- Profile (coach on top, then plan, then settings) ---------- */
+function recoveryItems(){
+  const now=Date.now(); const act=[];
+  for (let i=0;i<4;i++){ const d=S.days.get(addDays(localDate(),-i)); if(!d) continue;
+    for (const a of d.sports||[]) if (a.recovery&&a.recovery.ready_at&&Date.parse(a.recovery.ready_at)>now) act.push({label:actTitle(a), date:d.date, r:a.recovery});
+    if (d.gym_recovery&&d.gym_recovery.ready_at&&Date.parse(d.gym_recovery.ready_at)>now) act.push({label:'Gym: '+(d.gym_recovery.muscles||[]).join(', '), date:d.date, r:d.gym_recovery}); }
+  return act;
+}
+function profileForm(){
+  const p = prof(), T = targets();
   const opt = (obj,val) => Object.entries(obj).map(([k,v])=>`<option value="${k}" ${k===val?'selected':''}>${esc(v.label)}</option>`).join('');
-  return `<div class="grid two">
-    <section class="panel"><div class="panel-head"><h2>You</h2>${S.profile?'':'<span class="tag est">not saved yet</span>'}</div>
-      <form class="form" id="profForm">
+  return `<form class="form profForm">
         <label class="field">Sex<select id="pf_sex" name="sex"><option value="male" ${p.sex==='male'?'selected':''}>Male</option><option value="female" ${p.sex==='female'?'selected':''}>Female</option></select></label>
         <label class="field">Date of birth<input id="pf_birth" name="birth" type="date" max="${localDate()}" value="${esc(p.birth||'')}"><span class="hint">${p.birth?`Age ${ageOf(p)}`:`Using age ${esc(p.age)} until you add it`}</span></label>
         <label class="field">Height (cm)<input id="pf_height" name="height_cm" type="number" min="120" max="230" step="0.5" value="${esc(p.height_cm)}"></label>
-        <label class="field">Weight (kg)<input id="pf_weight" name="weight_kg" type="number" min="30" max="250" step="0.1" value="${esc(p.weight_kg)}"><span class="hint">Logging “weight 72.4” updates this. Targets use your smoothed trend: ${n1(who(localDate()).kg)} kg.</span></label>
-        <label class="field">Body fat % (optional)<input id="pf_bf" name="body_fat" type="number" min="3" max="60" step="0.1" placeholder="Optional" value="${esc(p.body_fat??'')}"><span class="hint">Only from a DEXA scan or a tape measurement. When set, resting burn uses Katch-McArdle, which accounts for muscle.</span></label>
-        <label class="field full">Daily life, not counting gym and sport<select id="pf_act" name="activity">${opt(ACTIVITY,actId(p.activity))}</select><span class="hint">Your logged gym and sport sessions are added on the day you do them, counted on top of resting only.</span></label>
+        <label class="field">Weight (kg)<input id="pf_weight" name="weight_kg" type="number" min="30" max="250" step="0.1" value="${esc(p.weight_kg)}"><span class="hint">Trend: ${n1(who(localDate()).kg)} kg</span></label>
+        <label class="field">Body fat %<input id="pf_bf" name="body_fat" type="number" min="3" max="60" step="0.1" placeholder="Optional" value="${esc(p.body_fat??'')}"><span class="hint">Only from a DEXA scan or tape measurement.</span></label>
         <label class="field">Goal<select id="pf_goal" name="goal">${opt(GOALS,p.goal)}</select></label>
-        <label class="field">Rate (kg per week)<select id="pf_rate" name="goal_rate">${(p.goal==='gain'?[0.1,0.25,0.5]:[0.25,0.5,0.75,1]).map(r=>`<option value="${r}" ${Number(p.goal_rate)===r?'selected':''}>${r}</option>`).join('')}</select><span class="hint">${(()=>{ const kg=who(localDate()).kg, r=Number(p.goal_rate)||0, pc=r/kg*100; return p.goal==='lose' ? (pc>1?`That’s ${n1(pc)}% of your weight a week, faster than the 0.5–1% that protects muscle.`:`About ${n1(pc)}% of your weight a week.`) : p.goal==='gain' ? 'Slower gains (0.25–0.5% a week) keep fat gain low.' : 'Used for lose and gain.'; })()}</span></label>
+        <label class="field">Rate (kg per week)<select id="pf_rate" name="goal_rate">${(p.goal==='gain'?[0.1,0.25,0.5]:[0.25,0.5,0.75,1]).map(r=>`<option value="${r}" ${Number(p.goal_rate)===r?'selected':''}>${r}</option>`).join('')}</select></label>
+        <label class="field full">Daily life, not counting gym and sport<select id="pf_act" name="activity">${opt(ACTIVITY,actId(p.activity))}</select></label>
         <label class="field full">Maintenance calories<select id="pf_maint" name="maint_source"><option value="auto" ${p.maint_source!=='formula'?'selected':''}>Measured from my logs when ready (recommended)</option><option value="formula" ${p.maint_source==='formula'?'selected':''}>Always use the formula</option></select><span class="hint">${T.adaptive.ready?`Ready: your logs show you burn about ${n0(T.adaptive.tdee)} kcal a day.`:`Still learning: needs ${esc(T.adaptive.need.join(', '))}.`}</span></label>
         <label class="check full"><input type="checkbox" id="pf_eatback" ${p.eat_back!==false?'checked':''}> Add each day’s gym and sport calories to that day’s target</label>
-        <div class="full"><h3>Daily goals</h3><div class="muted small">Leave a box empty to use the suggested goal. Type your own number to change it.</div></div>
+        <div class="full row"><button class="btn" type="submit">Save</button></div>
+      </form>`;
+}
+function goalsForm(){
+  const p = prof(), T = targets(), SG = suggestedTargets();
+  return `<form class="form profForm">
+        <div class="full muted small">Leave a box empty to use the suggested goal.</div>
         ${[['pf_kcal','calorie_override','Calories','kcal',SG.kcal,1000,6000,10],['pf_prot','protein_override','Protein','g',SG.protein,30,400,1],['pf_carbs','carbs_override','Carbs','g',SG.carbs,0,900,1],['pf_fat','fat_override','Fat','g',SG.fat,20,300,1],['pf_water','water_override_ml','Water','ml',SG.water_ml,1000,8000,250]].map(([id,key,label,unit,sug,mn,mx,st])=>`
           <label class="field">${label} (${unit})<input id="${id}" name="${key}" type="number" min="${mn}" max="${mx}" step="${st}" placeholder="Suggested ${n0(sug)}" value="${esc(p[key]??'')}">
-          <span class="hint">${p[key]?`Your goal · suggested ${n0(sug)} ${unit} <button type="button" class="linkbtn" data-action="resetGoal" data-key="${key}" style="padding:0 2px">Use suggested</button>`:`Using suggested ${n0(sug)} ${unit}`}</span></label>`).join('')}
-        ${(p.carbs_override&&p.fat_override&&!p.calorie_override)?`<div class="full muted small">With both carbs and fat set, your calorie goal is worked out from your macros: ${n0(T.kcal)} kcal.</div>`:''}
-        ${T.fat < Math.round(0.6*(Number(p.weight_kg)||70)) ? `<div class="full banner">With these goals fat drops to ${n0(T.fat)} g, below the ${n0(0.6*(Number(p.weight_kg)||70))} g (0.6 g per kg) your body needs for hormones and vitamin absorption. Lower carbs or protein a little, or set fat yourself.</div>` : ''}
-        ${(()=>{ const mk=T.protein*4+T.carbs*4+T.fat*9; return Math.abs(mk-T.kcal)>60 ? `<div class="full banner">Your protein, carbs and fat add up to ${n0(mk)} kcal, but your calorie goal is ${n0(T.kcal)} kcal. Adjust one of them so they match.</div>` : ''; })()}
+          <span class="hint">${p[key]?`Yours · suggested ${n0(sug)} <button type="button" class="linkbtn" data-action="resetGoal" data-key="${key}" style="padding:0 2px">Use suggested</button>`:`Suggested ${n0(sug)} ${unit}`}</span></label>`).join('')}
         <label class="field">Daily steps goal<input id="pf_steps" name="steps_goal" type="number" min="1000" max="50000" step="500" value="${esc(p.steps_goal??10000)}"></label>
-        <label class="check full"><input type="checkbox" id="pf_watch" ${p.watch_workouts?'checked':''}> My Apple Watch records my gym and sport sessions (so they're already in Active energy)</label>
-        <div class="full row"><button class="btn" type="submit">Save profile</button><span class="muted small" id="profMsg"></span></div>
+        ${T.fat < Math.round(0.6*(Number(p.weight_kg)||70)) ? `<div class="full banner">With these goals fat drops to ${n0(T.fat)} g, below the ${n0(0.6*(Number(p.weight_kg)||70))} g your body needs. Lower carbs or protein a little, or set fat yourself.</div>` : ''}
+        ${(()=>{ const mk=T.protein*4+T.carbs*4+T.fat*9; return Math.abs(mk-T.kcal)>60 ? `<div class="full banner">Your protein, carbs and fat add up to ${n0(mk)} kcal, but your calorie goal is ${n0(T.kcal)} kcal. Adjust one so they match.</div>` : ''; })()}
+        <div class="full row"><button class="btn" type="submit">Save goals</button></div>
       </form>
-    </section>
-    <section class="panel"><div class="panel-head"><h2>Daily targets</h2></div>
       <div class="kv">
         <span>Resting burn (${esc(T.bmrMethod)})</span><b>${n0(T.bmr)} kcal</b>
-        <span>× daily life ${T.level.f}</span><b>${n0(T.tdee)} kcal</b>
-        ${T.adaptive.ready?`<span>Measured maintenance (last 28 days)</span><b>${n0(T.adaptive.baseWithoutExercise)} kcal</b>`:''}
         <span>Maintenance used</span><b>${n0(T.maint)} kcal <span class="tag">${T.maintSource}</span></b>
         <span>Goal</span><b>${T.goalDelta>0?'+':T.goalDelta<0?'−':''}${n0(Math.abs(T.goalDelta))} kcal</b>
-        <span><strong>Calories</strong>${p.calorie_override?' <span class="tag">yours</span>':''}</span><b>${n0(T.kcal)} kcal</b>
-        <span><span class="swatch" style="background:var(--protein);display:inline-block"></span> Protein${p.protein_override?' <span class="tag">yours</span>':''}</span><b>${n0(T.protein)} g</b>
-        <span><span class="swatch" style="background:var(--carbs);display:inline-block"></span> Carbs${p.carbs_override?' <span class="tag">yours</span>':''}</span><b>${n0(T.carbs)} g</b>
-        <span><span class="swatch" style="background:var(--fat);display:inline-block"></span> Fat${p.fat_override?' <span class="tag">yours</span>':''}</span><b>${n0(T.fat)} g</b>
-        <span>Fibre</span><b>${n0(T.fiber)} g</b>
-        <span>Added sugar, up to</span><b>${n0(T.sugar)} g</b>
-        <span>Water</span><b>${n1(T.water_ml/1000)} L</b>
+        <span>Fibre</span><b>${n0(T.fiber)} g</b><span>Added sugar, up to</span><b>${n0(T.sugar)} g</b>
       </div>
-      <div class="muted small">Protein is ${GOALS[p.goal]?.ppk||1.6} g per kg${T.refKg<T.weight-0.5?` of ${n1(T.refKg)} kg (your weight at BMI 25, since protein needs follow muscle, not total weight)`:' of body weight'} for “${esc(GOALS[p.goal]?.label||'')}”. Fat is 25% of calories (at least 0.6 g per kg), carbs fill the rest. ${p.goal==='lose'?`Losing ${p.goal_rate} kg a week takes about ${n0(p.goal_rate*7700/7)} kcal a day under maintenance (1 kg of body weight ≈ 7,700 kcal).`:p.goal==='gain'?`Gaining ${p.goal_rate} kg a week takes about ${n0(p.goal_rate*7700/7)} kcal a day over maintenance.`:''} ${T.floored?`Your pace would go under ${n0(T.floor)} kcal, so the target is capped there; pick a slower rate.`:''} Nutrient targets are the adult reference intakes for your sex and age (${T.age}).</div>
-      <h3>Sports you play</h3>
-      ${sportsProfileHtml()}
-      <h3>Your food list</h3>
-      <div class="row"><button class="btn ghost sm" data-action="importIndb" ${S.libBusy?'disabled':''}>${(S.libFoods||[]).length?'Re-import INDB.xlsx':'Import 1,014 Indian recipes (INDB.xlsx)'}</button><span class="status${/isn|failed|Couldn|declined|Only|empty|Reconnect/.test(S.libStatus||'')?' err':''}">${esc(S.libStatus||((S.libFoods||[]).length?`${(S.libFoods||[]).length} INDB recipes loaded.`:''))}</span></div>
-      ${(()=>{ const list=Object.entries(S.myFoods||{}).sort((a,b)=>(b[1].updated||0)-(a[1].updated||0)); return `<div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs (${list.filter(x=>x[1].verified).length} corrected by you). These log instantly without AI.</div>`
-        + (list.length?`<div>${list.slice(0,40).map(([k,f])=>`<div class="item"><div><div class="nm">${esc(f.name)}${f.verified?' <span class="tag">corrected</span>':''}</div><div class="sub">${n0(f.per.kcal)} kcal · P ${n1(f.per.protein)} · C ${n1(f.per.carbs)} · F ${n1(f.per.fat)} per 100 g${f.units&&f.units.serving?` · usual ${n0(f.units.serving)} g`:''}</div></div><span></span><div class="acts"><button data-action="rmFood" data-key="${esc(k)}" aria-label="Remove ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`:''); })()}
-      <h3>Daily supplements</h3>
-      ${(p.stack||[]).length ? `<div>${p.stack.map(st=>`<div class="item"><div><div class="nm">${esc(st.name)}</div><div class="sub">${esc(st.dose)}</div></div><span></span><div class="acts"><button data-action="rmStack" data-id="${st.id}" aria-label="Remove ${esc(st.name)}">Remove</button></div></div>`).join('')}</div>` : `<div class="muted small">None yet. Log a supplement on Today and tap “Add to daily list”.</div>`}
-
+      <div class="muted small">Protein is ${GOALS[p.goal]?.ppk||1.6} g per kg${T.refKg<T.weight-0.5?` of ${n1(T.refKg)} kg (your weight at BMI 25)`:' of body weight'}. Fat is 25% of calories, carbs fill the rest. ${p.goal==='lose'?`Losing ${p.goal_rate} kg a week takes about ${n0(p.goal_rate*7700/7)} kcal a day under maintenance.`:p.goal==='gain'?`Gaining ${p.goal_rate} kg a week takes about ${n0(p.goal_rate*7700/7)} kcal a day over maintenance.`:''} ${T.floored?`Capped at ${n0(T.floor)} kcal for safety; pick a slower rate.`:''}</div>`;
+}
+function supplementsFold(){
+  const p = prof(), today = getDay(localDate());
+  return `${(p.stack||[]).length ? `<div>${p.stack.map(st=>`<div class="item"><div><div class="nm">${esc(st.name)}</div><div class="sub">${esc(st.dose)}</div></div><span></span><div class="acts"><button data-action="rmStack" data-id="${st.id}" aria-label="Remove ${esc(st.name)}">Remove</button></div></div>`).join('')}</div>
+      <label class="check small"><input type="checkbox" data-action="stackAuto" ${p.stack_auto!==false?'checked':''}> Add these to my log automatically every day</label>
+      <h3>Today</h3>${supplementsPanel(today)}`
+    : `<div class="muted small">Log a supplement on Today (e.g. “creatine 5g, vitamin D3 60000 IU”), then come back here and tap “Add to daily list”. After that it’s added for you every day.</div>${supplementsPanel(today)}`}`;
+}
+function connectFold(){
+  const p = prof();
+  return `<label class="check"><input type="checkbox" data-action="watchToggle" ${p.watch_workouts?'checked':''}> My watch records my gym and sport sessions (so they’re already in its active calories)</label>
+    <ul class="tips">
+      <li><b>Apple Watch / Apple Health:</b> type your day into the log box, like “slept 7h 10m, 9200 steps, active 520 kcal”, or add a screenshot of the Health summary with Add photo. The AI reads it.</li>
+      <li><b>Garmin, Fitbit, Samsung and others:</b> the same works with a screenshot of the watch app’s daily summary. On iPhone you can also let Garmin Connect write to Apple Health.</li>
+    </ul>
+    <div class="muted small">A web app can’t read Apple Health or Garmin directly, so there’s no automatic sync yet. Typing or a screenshot takes a few seconds a day.</div>`;
+}
+function dataFold(){
+  return `<div class="row"><button class="btn sm" data-action="exportExcel" ${S.xlsBusy?'disabled':''}>${S.xlsBusy?'Preparing…':'Download all my data (Excel)'}</button></div>
+    <div class="muted small">One spreadsheet with a sheet each for daily totals, food, gym sets, sport, supplements and blood tests.</div>
+    <div class="row"><button class="btn ghost sm" data-action="exportData">Download backup (JSON)</button><button class="btn ghost sm" data-action="importData">Restore from backup</button></div>
+    <div class="muted small">The backup file can be restored into this app later. Restoring also accepts an export from the claude.ai version.</div>`;
+}
+function securityFold(){
+  return `<div class="muted small">Signed in as ${esc(S.user?.email||'')}. Set or change the password you use to sign in (including on the home-screen app).</div>
+    <div class="row"><input id="newPass" type="password" autocomplete="new-password" placeholder="New password (8+ characters)" class="inp" style="flex:1;min-width:0"><button class="btn ghost sm" data-action="setPassword">Set password</button></div>
+    <div class="row"><button class="btn ghost sm" data-action="signOut">Sign out on this device</button></div>`;
+}
+function accountFold(){
+  const u = S.usage;
+  return `<div class="kv"><span>Email</span><b>${esc(S.user?.email||'')}</b>
+      <span>AI</span><b>${!S.sample?'Off in config.js':S.aiHealth==='ok'?'Connected':S.aiHealth?`<span style="color:var(--bad)">${esc(S.aiHealth==='unavailable'?'Can’t reach the AI service':AI_ERR[S.aiHealth]||S.aiHealth)}</span>`:'Checking…'}</b>
+      <span>AI uses today</span><b>${u?`${u.count} of ${u.cap}`:'—'}</b>
+      <span>Sync</span><b>${{synced:'Up to date',saving:'Saving…',offline:'Offline',error:'Retrying'}[S.sync]||'—'}${S.db&&S.db.pendingCount()?` · ${S.db.pendingCount()} waiting`:''}</b></div>
+    <div class="row"><button class="btn ghost sm" data-action="refreshUsage">Check again</button></div>`;
+}
+function foodListHtml(){
+  const list=Object.entries(S.myFoods||{}).sort((a,b)=>(b[1].updated||0)-(a[1].updated||0));
+  return `<div class="row"><button class="btn ghost sm" data-action="importIndb" ${S.libBusy?'disabled':''}>${(S.libFoods||[]).length?'Re-import INDB.xlsx':'Import 1,014 Indian recipes (INDB.xlsx)'}</button><span class="status${/isn|failed|Couldn|declined|Only|empty|Reconnect/.test(S.libStatus||'')?' err':''}">${esc(S.libStatus||'')}</span></div>
+    <div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs. These log instantly without AI.</div>
+    ${list.length?`<div>${list.slice(0,40).map(([k,f])=>`<div class="item"><div><div class="nm">${esc(f.name)}${f.verified?' <span class="tag">corrected</span>':''}</div><div class="sub">${n0(f.per.kcal)} kcal · P ${n1(f.per.protein)} · C ${n1(f.per.carbs)} · F ${n1(f.per.fat)} per 100 g</div></div><span></span><div class="acts"><button data-action="rmFood" data-key="${esc(k)}" aria-label="Remove ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`:''}`;
+}
+function viewProfile(){
+  const p = prof(), T = targets();
+  const t=dayTotals(getDay(localDate())), TT=dayTargets(getDay(localDate()));
+  const rec = recoveryItems(); const reps = S.reports||[]; const rv = (S.reviews||[])[0];
+  const plan = (S.plans||[]).find(x=>x.date>=localDate());
+  return `<div class="grid">
+    <div class="panel-head"><h2>Coach</h2></div>
+    <section class="panel"><div class="panel-head"><h3>What to eat next</h3><span class="muted small">${n0(Math.max(0,TT.kcal-t.kcal))} kcal · ${n0(Math.max(0,TT.protein-t.protein))} g protein left</span></div>
+      <div class="row"><button class="btn sm" data-action="ideas" ${S.ideasBusy||S.aiState==='off'?'disabled':''}>${S.ideas&&S.ideas.length?'Suggest again':'Suggest meals'}</button></div>
+      ${ideasHtml()}
     </section>
-  </div>
-  <div style="margin-top:16px">${viewHealth()}</div>
-  ${accountPanel()}`;
+    <section class="panel"><div class="panel-head"><h3>What to train or play</h3>${plan?`<span class="muted small">${esc(plan.date===localDate()?'Today':fmtDate(plan.date,{weekday:'long'}))}</span>`:''}</div>
+      ${plan ? `<div class="plan-h"><b>${esc(plan.focus)}</b><span class="pill ${plan.readiness==='good'?'good':plan.readiness==='low'?'bad':'warn'}">readiness ${esc(plan.readiness)}</span></div><div class="small">${esc(plan.why)}</div>`
+        : '<div class="muted small">Plans your next gym session or sport day from what you did this week, your recovery and your recent weights.</div>'}
+      <div class="row"><button class="btn sm" data-action="goto" data-view="gym">${plan?'See the full session':'Plan my next session'}</button></div>
+    </section>
+    <section class="panel"><div class="panel-head"><h3>Recovery</h3><span class="muted small">${rec.length?`${rec.length} still recovering`:'fresh'}</span></div>
+      ${rec.length ? rec.map(x=>`<div class="act"><div class="nm">${esc(x.label)} <span class="muted small">${esc(fmtDate(x.date,{weekday:'short'}))}</span></div>${recoveryHtml(x.r)}</div>`).join('')
+        : '<div class="small">Nothing is still recovering from the last few days, so you’re clear for a hard session.</div>'}
+    </section>
+    <h2 class="sect">My plan</h2>
+    <section class="panel folds">
+      ${fold('p-goals', 'Daily goals', `${n0(T.kcal)} kcal · ${n0(T.protein)} g protein`, goalsForm())}
+      ${fold('p-blood', 'Blood tests', reps.length?`${reps.length} report${reps.length===1?'':'s'}`:'add a report', viewHealth())}
+      ${fold('p-supps', 'Vitamins &amp; supplements', (p.stack||[]).length?`${p.stack.length} daily${p.stack_auto!==false?' · auto-added':''}`:'', supplementsFold())}
+    </section>
+    <h2 class="sect">Settings</h2>
+    <section class="panel folds">
+      ${fold('s-review', 'Coach review', rv?`last ${esc(fmtDate(rv.date,{day:'numeric',month:'short'}))}`:'weekly check-in', reviewPanel())}
+      ${fold('s-profile', 'My details', `${esc(p.sex)} · ${n1(who(localDate()).kg)} kg · ${esc((GOALS[p.goal]||{}).label||'')}`, profileForm())}
+      ${fold('s-security', 'Password &amp; security', '', securityFold())}
+      ${fold('s-data', 'Download my data', 'Excel', dataFold())}
+      ${fold('s-connect', 'Watch &amp; health apps', p.watch_workouts?'watch on':'', connectFold())}
+      ${fold('s-sports', 'Sports &amp; food list', `${Object.keys(p.sports||{}).length} sport${Object.keys(p.sports||{}).length===1?'':'s'}`, `<h3>Sports you play</h3>${sportsProfileHtml()}<h3>Your food list</h3>${foodListHtml()}`)}
+      ${fold('s-account', 'Account', esc(S.user?.email||''), accountFold())}
+    </section>
+  </div>`;
+}
+
+/* ---------- daily supplements, added automatically ---------- */
+function autoStack(){
+  const p = prof(), today = localDate();
+  if (!S.dbReady || S.stackAutoDate===today || p.stack_auto===false || !(p.stack||[]).length) return;
+  S.stackAutoDate = today;
+  const d = getDay(today); if (d.stack_auto) return;
+  writeDay(today, d => { d.supplements = d.supplements||[]; d.stack_auto = true;
+    for (const st of p.stack) if (!d.supplements.some(x=>x.stack_id===st.id)) d.supplements.push({id:uid(), name:st.name, dose:st.dose, micros:{...st.micros}, stack_id:st.id, time:nowTime(), auto:true}); });
+}
+
+/* ---------- Excel export ---------- */
+async function loadXlsx(){
+  if (window.XLSX) return;
+  await new Promise((res,rej)=>{ const el=document.createElement('script'); el.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; el.onload=res; el.onerror=()=>rej({msg:'Couldn’t load the spreadsheet tool. Check your connection and try again.'}); document.head.appendChild(el); });
+}
+async function exportExcel(){
+  S.xlsBusy=true; render();
+  try {
+    await loadXlsx();
+    const days = [...S.days.values()].sort((a,b)=>a.date.localeCompare(b.date));
+    const r1 = v => Math.round((Number(v)||0)*10)/10;
+    const summary=[], food=[], gym=[], sport=[], supps=[], blood=[];
+    for (const d of days) {
+      const t=dayTotals(d), T=dayTargets(d), H=d.health||{};
+      summary.push({Date:d.date, 'Calories eaten':Math.round(t.kcal), 'Calorie target':Math.round(T.kcal), 'Protein (g)':r1(t.protein), 'Carbs (g)':r1(t.carbs), 'Fat (g)':r1(t.fat), 'Fibre (g)':r1(t.fiber), 'Sugar (g)':r1(t.sugar),
+        'Water (L)':r1(t.water/1000), 'Burned (kcal)':Math.round(burnedTotal(d).total), 'Training (kcal)':Math.round(t.burned||0), Steps:H.steps||'', 'Sleep (h)':H.sleep_min?r1(H.sleep_min/60):'', 'Weight (kg)':d.weight_kg||''});
+      for (const f of d.foods||[]) food.push({Date:d.date, Meal:f.meal, Time:f.time||'', Food:f.name, Quantity:f.quantity||'', Grams:Math.round(f.grams||0), kcal:Math.round(f.kcal||0), 'Protein (g)':r1(f.protein), 'Carbs (g)':r1(f.carbs), 'Fat (g)':r1(f.fat), 'Fibre (g)':r1(f.fiber), 'Sugar (g)':r1(f.sugar)});
+      for (const e of d.exercises||[]) { const sets=e.sets||[]; if (!sets.length) gym.push({Date:d.date, Exercise:e.name, 'Muscle group':e.muscle_group||'', Set:'', 'Weight (kg)':'', Reps:'', Minutes:e.duration_min||'', kcal:Math.round(e.kcal||0)});
+        sets.forEach((s,i)=>gym.push({Date:d.date, Exercise:e.name, 'Muscle group':e.muscle_group||'', Set:i+1, 'Weight (kg)':s.weight||0, Reps:s.reps||0, Minutes:'', kcal:i===0?Math.round(e.kcal||0):''})); }
+      for (const a of d.sports||[]) sport.push({Date:d.date, Activity:actTitle(a), Details:actLine(a), Minutes:Math.round(a.minutes||0), 'Effort (1-10)':a.rpe||'', kcal:Math.round(a.kcal||0)});
+      for (const s of d.supplements||[]) supps.push({Date:d.date, Supplement:s.name, Dose:s.dose||''});
+    }
+    for (const r of S.reports||[]) for (const m of r.markers||[]) blood.push({'Report date':r.report_date, Lab:r.lab||'', Test:m.name, Value:m.value??m.value_text??'', Unit:m.unit||'', Range:m.ref||'', Status:m.status||''});
+    const wb = XLSX.utils.book_new();
+    for (const [name, rows] of [['Daily',summary],['Food',food],['Gym',gym],['Sport',sport],['Supplements',supps],['Blood tests',blood]])
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length?rows:[{Note:'Nothing logged yet'}]), name);
+    XLSX.writeFile(wb, `fuel-lift-${localDate()}.xlsx`);
+  } catch(e) { toast(e?.msg || 'Couldn’t build the spreadsheet. Try again.'); }
+  finally { S.xlsBusy=false; render(); }
 }
 
 /* ---------- dialogs ---------- */
@@ -1797,10 +1912,11 @@ function render(){
   if (S.sync==='offline') html += `<div class="banner" style="margin-bottom:16px">You’re offline. Everything you log is saved on this device and syncs when you’re back online.</div>`;
   else if (S.sync==='error') html += `<div class="banner" style="margin-bottom:16px">Couldn’t sync with the server. Your changes are safe on this device; retrying.</div>`;
   if (S.dbState==='connecting') html += `<div class="muted small" style="margin-bottom:12px">Loading your log…</div>`;
-  html += S.view==='setup'&&S.setup?viewSetup():S.view==='gym'?viewGym():S.view==='trends'?viewTrends():S.view==='coach'?viewCoach():S.view==='health'?viewProfile():S.view==='profile'?viewProfile():viewToday();
+  html += S.view==='setup'&&S.setup?viewSetup():S.view==='gym'?viewGym():S.view==='trends'?viewTrends():S.view==='coach'||S.view==='health'?viewProfile():S.view==='profile'?viewProfile():viewToday();
   $('#main').innerHTML = html;
   const ta2 = $('#logText'); if (ta2) { ta2.value = draft; if (hadFocus) ta2.focus(); }
-  const pf = $('#profForm'); if (pf) pf.onsubmit = onProfileSubmit;
+  document.querySelectorAll('.profForm').forEach(f => { f.onsubmit = onProfileSubmit; });
+  autoStack();
 }
 function onProfileSubmit(ev){
   ev.preventDefault();
@@ -1813,7 +1929,7 @@ function onProfileSubmit(ev){
   const p = {...prof(), sex:v('#pf_sex'), birth, age:birth?Calc.ageOn(birth, localDate()):prof().age, height_cm:num(v('#pf_height'),250)||170, weight_kg:num(v('#pf_weight'),300)||70,
     body_fat:bf, maint_source:v('#pf_maint'), eat_back:$('#pf_eatback').checked,
     activity:v('#pf_act'), goal:v('#pf_goal'), goal_rate:Number(v('#pf_rate'))||0.5,
-    calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000, watch_workouts:$('#pf_watch').checked};
+    calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000};
   saveProfile(p); toast('Profile saved. Targets updated.');
 }
 function setView(v){ S.view=v; S.status=''; S.statusErr=false; render(); window.scrollTo({top:0}); }
@@ -1863,7 +1979,9 @@ document.addEventListener('click', ev => {
     case 'delSport': { const i=(day.sports||[]).findIndex(y=>y.id===b.dataset.id); if(i<0) break; const item=day.sports[i]; const date=S.date;
       writeDay(date, d => { d.sports=d.sports.filter(y=>y.id!==item.id); }); toast(`Deleted ${actTitle(item)}`, () => writeDay(date, d => { d.sports=d.sports||[]; d.sports.splice(i,0,item); })); break; }
     case 'gymPeriod': S.gymPeriod=b.dataset.p; render(); break;
-    case 'pickEx': S.gymEx=b.dataset.key; render(); break;
+    case 'pickEx': S.gymEx = S.gymEx===b.dataset.key ? null : b.dataset.key; render(); break;
+    case 'allEx': S.allEx=!S.allEx; render(); break;
+    case 'exportExcel': exportExcel(); break;
     case 'range': S.trendRange=+b.dataset.n; render(); break;
     case 'toggleStack': { const st=(prof().stack||[]).find(x=>x.id===b.dataset.id); if(!st) break;
       writeDay(S.date, d => { d.supplements = d.supplements||[]; const i=d.supplements.findIndex(x=>x.stack_id===st.id);
@@ -1889,11 +2007,11 @@ document.addEventListener('click', ev => {
     case 'review': runReview(); break;
     case 'plan': runPlan(); break;
     case 'planFor': S.planFor=b.dataset.d; render(); break;
-    case 'planToLog': { const pl=(S.plans||[]).find(x=>x.date>=localDate()); if (S.view==='coach') setView('gym'); const ta=$('#logText'); if (!pl||!ta) break;
+    case 'planToLog': { const pl=(S.plans||[]).find(x=>x.date>=localDate()); if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (!pl||!ta) break;
       ta.value = pl.exercises.map(e=>{ const w=(String(e.weight).match(/(\d+(?:\.\d+)?)\s*kg/)||[])[1]; return `${e.name} ${e.sets||3}x${String(e.reps).replace(/[^\d-]/g,'').split('-').pop()||8}${w?' @'+w+'kg':''}`; }).join(', ');
       ta.focus(); ta.scrollIntoView({block:'center'}); setStatus('Edit anything you did differently, then tap Log.'); break; }
     case 'ideas': runIdeas(); break;
-    case 'useIdea': { const x=(S.ideas||[])[+b.dataset.i]; if (S.view==='coach') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (x&&ta) { ta.value=`${x.name}: ${x.items}`; ta.focus(); ta.scrollIntoView({block:'center'}); } break; }
+    case 'useIdea': { const x=(S.ideas||[])[+b.dataset.i]; if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (x&&ta) { ta.value=`${x.name}: ${x.items}`; ta.focus(); ta.scrollIntoView({block:'center'}); } break; }
     case 'relog': { let f=null; for (const [,d] of S.days) { f=(d.foods||[]).find(y=>y.id===b.dataset.id); if (f) break; } if(!f) break;
       const copy={...structuredClone(f), id:uid(), time:nowTime(), meal:guessMeal()}; const date=S.date;
       writeDay(date, d=>d.foods.push(copy)); toast(`Logged ${f.name}`, () => writeDay(date, d => { d.foods=d.foods.filter(y=>y.id!==copy.id); })); break; }
@@ -1917,7 +2035,10 @@ document.addEventListener('click', ev => {
 document.addEventListener('change', ev => {
   const el = ev.target;
   if (el.dataset && el.dataset.action==='dayComplete') { const on = el.checked; writeDay(S.date, d => { if (on) delete d.incomplete; else d.incomplete = true; }); }
+  if (el.dataset && el.dataset.action==='stackAuto') saveProfile({...prof(), stack_auto:el.checked});
+  if (el.dataset && el.dataset.action==='watchToggle') saveProfile({...prof(), watch_workouts:el.checked});
 });
+document.addEventListener('toggle', ev => { const k = ev.target.dataset && ev.target.dataset.fold; if (k) { if (ev.target.open) S.openFolds.add(k); else S.openFolds.delete(k); } }, true);
 document.addEventListener('input', ev => bindInput(ev.target));
 document.addEventListener('change', ev => bindInput(ev.target));
 function bindInput(el){
@@ -1969,15 +2090,6 @@ function maintenancePanel(){
   return `<section class="panel"><div class="panel-head"><h3>Your real maintenance</h3><span class="pill warn">learning</span></div>
     <div class="small">Formulas can be 10% or more off for any one person. After a few weeks of logging food and weighing in, the app measures what you actually burn from how your weight responds, and sets your targets from that.</div>
     <div class="muted small">Still needed: ${esc(ad.need.join(', '))}.</div></section>`;
-}
-function accountPanel(){
-  const u = S.usage;
-  return `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Account</h2><span class="muted small">${esc(S.user?.email||'')}</span></div>
-    <div class="kv" style="max-width:460px"><span>AI</span><b>${!S.sample?'Off in config.js':S.aiHealth==='ok'?'Connected':S.aiHealth?`<span style="color:var(--bad)">${esc(S.aiHealth==='unavailable'?'Can’t reach the AI service':AI_ERR[S.aiHealth]||S.aiHealth)}</span>`:'Checking…'}</b>
-      <span>AI uses today</span><b>${u?`${u.count} of ${u.cap} used`:'—'}</b><span>Sync</span><b>${{synced:'Up to date',saving:'Saving…',offline:'Offline',error:'Retrying'}[S.sync]||'—'}${S.db&&S.db.pendingCount()?` · ${S.db.pendingCount()} waiting`:''}</b></div>
-    <div class="row"><input id="newPass" type="password" autocomplete="new-password" placeholder="New password (8+ characters)" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:7px 10px"><button class="btn ghost sm" data-action="setPassword">Set password</button></div>
-    <div class="row"><button class="btn ghost sm" data-action="exportData">Download backup</button><button class="btn ghost sm" data-action="importData">Restore from backup</button><span class="spacer"></span><button class="btn ghost sm" data-action="signOut">Sign out</button></div>
-    <div class="muted small">A backup is one JSON file with everything: days, profile, foods, reports, plans and reviews. Restoring also accepts an export from the claude.ai version of Fuel &amp; Lift.</div></section>`;
 }
 function exportData(){
   const blob = new Blob([JSON.stringify({app:'fuel-lift', v:1, exported:new Date().toISOString(), docs:S.db.dump()}, null, 1)], {type:'application/json'});
@@ -2105,7 +2217,7 @@ async function startFor(user){
     S.days = m; S.rev++; S.dbState='on'; render();
   });
   await db.start();
-  S.dbState='on'; render();
+  S.dbReady = true; S.dbState='on'; render();
   refreshUsage();
 }
 
