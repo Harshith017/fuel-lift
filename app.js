@@ -1902,6 +1902,9 @@ document.addEventListener('click', ev => {
     case 'importIndb': importIndb(); break;
     case 'authSend': authSend(); break;
     case 'authVerify': authVerify(); break;
+    case 'authPassword': authPassword(); break;
+    case 'authSignUp': authSignUp(); break;
+    case 'setPassword': setPassword(); break;
     case 'authGoogle': authGoogle(); break;
     case 'authBack': S.auth={step:'email', email:S.auth.email, msg:'', busy:false}; render(); break;
     case 'signOut': if (confirm(S.db&&S.db.pendingCount() ? `Sign out? ${S.db.pendingCount()} change(s) haven’t synced yet and will be lost.` : 'Sign out on this device? Your data stays in your account.')) signOut(); break;
@@ -1929,7 +1932,9 @@ function bindInput(el){
 document.addEventListener('keydown', ev => {
   if (ev.key==='Enter' && ev.target.matches('tr.click')) ev.target.click();
   if (ev.key==='Enter' && (ev.metaKey||ev.ctrlKey) && ev.target.id==='logText') submitLog();
-  if (ev.key==='Enter' && ev.target.id==='authEmail') { ev.preventDefault(); authSend(); }
+  if (ev.key==='Enter' && ev.target.id==='authEmail') { ev.preventDefault(); $('#authPass')?.focus(); }
+  if (ev.key==='Enter' && ev.target.id==='authPass') { ev.preventDefault(); authPassword(); }
+  if (ev.key==='Enter' && ev.target.id==='newPass') { ev.preventDefault(); setPassword(); }
   if (ev.key==='Enter' && ev.target.id==='authCode') { ev.preventDefault(); authVerify(); }
 });
 $('#reportInput').addEventListener('change', ev => { const fs=[...(ev.target.files||[])]; ev.target.value=''; onReportFiles(fs); });
@@ -1970,6 +1975,7 @@ function accountPanel(){
   return `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Account</h2><span class="muted small">${esc(S.user?.email||'')}</span></div>
     <div class="kv" style="max-width:460px"><span>Claude</span><b>${!S.sample?'Off in config.js':S.aiHealth==='ok'?'Connected':S.aiHealth?`<span style="color:var(--bad)">${esc(S.aiHealth==='unavailable'?'Can’t reach the claude function':AI_ERR[S.aiHealth]||S.aiHealth)}</span>`:'Checking…'}</b>
       <span>Claude today</span><b>${u?`${u.count} of ${u.cap} used`:'—'}</b><span>Sync</span><b>${{synced:'Up to date',saving:'Saving…',offline:'Offline',error:'Retrying'}[S.sync]||'—'}${S.db&&S.db.pendingCount()?` · ${S.db.pendingCount()} waiting`:''}</b></div>
+    <div class="row"><input id="newPass" type="password" autocomplete="new-password" placeholder="New password (8+ characters)" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:7px 10px"><button class="btn ghost sm" data-action="setPassword">Set password</button></div>
     <div class="row"><button class="btn ghost sm" data-action="exportData">Download backup</button><button class="btn ghost sm" data-action="importData">Restore from backup</button><span class="spacer"></span><button class="btn ghost sm" data-action="signOut">Sign out</button></div>
     <div class="muted small">A backup is one JSON file with everything: days, profile, foods, reports, plans and reviews. Restoring also accepts an export from the claude.ai version of Fuel &amp; Lift.</div></section>`;
 }
@@ -1998,8 +2004,11 @@ let SB = null;
 function authView(){
   const a = S.auth, cfgOk = window.FL_CONFIG && /^https:\/\//.test(FL_CONFIG.SUPABASE_URL||'') && FL_CONFIG.SUPABASE_ANON_KEY && !/YOUR_/.test(FL_CONFIG.SUPABASE_ANON_KEY);
   if (!cfgOk) return `<section class="panel setup"><h2>Almost there</h2><p>This copy of Fuel &amp; Lift isn’t connected to a database yet. Put your Supabase project URL and anon key in <b>config.js</b>, following SETUP.md.</p></section>`;
+  if (a.step==='confirm') return `<section class="panel setup"><h2>Confirm your email</h2>
+    <p>We sent a confirmation link to <b>${esc(a.email)}</b>. Tap it once (any browser is fine), then come back here and sign in with your password.</p>
+    <div class="row"><span class="spacer"></span><button class="btn" data-action="authBack">Back to sign in</button></div></section>`;
   if (a.step==='code') return `<section class="panel setup"><h2>Check your email</h2>
-    <p>We sent a sign-in email to <b>${esc(a.email)}</b>. Type the 6-digit code from it here, or tap the link in the email on this device.</p>
+    <p>We sent a sign-in email to <b>${esc(a.email)}</b>. Tap the link in it on this device, in this browser. If the email shows a code, type it here.</p>
     <label class="field">Code<input id="authCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456"></label>
     <div class="row"><button class="btn ghost" data-action="authBack">Use another email</button><span class="spacer"></span><button class="btn" data-action="authVerify" ${a.busy?'disabled':''}>${a.busy?'Checking…':'Sign in'}</button></div>
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
@@ -2007,7 +2016,9 @@ function authView(){
     <p class="muted">Your food, training and health logs are private to you and sync across your phone and laptop.</p>
     ${FL_CONFIG.GOOGLE_SIGN_IN?`<button class="btn" data-action="authGoogle" style="width:100%">Continue with Google</button><div class="muted small" style="text-align:center">or</div>`:''}
     <label class="field">Email<input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(a.email)}"></label>
-    <div class="row"><span class="spacer"></span><button class="btn ${FL_CONFIG.GOOGLE_SIGN_IN?'ghost':''}" data-action="authSend" ${a.busy?'disabled':''}>${a.busy?'Sending…':'Email me a sign-in code'}</button></div>
+    <label class="field">Password<input id="authPass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></label>
+    <div class="row"><button class="btn ghost" data-action="authSignUp" ${a.busy?'disabled':''}>Create account</button><span class="spacer"></span><button class="btn" data-action="authPassword" ${a.busy?'disabled':''}>${a.busy?'Working…':'Sign in'}</button></div>
+    <div class="row"><button class="btn ghost sm" data-action="authSend" ${a.busy?'disabled':''}>Email me a sign-in link instead</button></div>
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
 }
 const redirectTo = () => location.origin + location.pathname;
@@ -2026,6 +2037,38 @@ async function authVerify(){
   S.auth={...S.auth, busy:true, msg:''}; render();
   const { error } = await SB.auth.verifyOtp({ email:S.auth.email, token, type:'email' });
   if (error) { S.auth={...S.auth, busy:false, err:true, msg:'That code didn’t work. It may have expired; send a new one.'}; render(); }
+}
+const authCreds = () => ({ email:($('#authEmail')?.value||'').trim().toLowerCase(), password:$('#authPass')?.value||'' });
+function authCheck(email, password, minLen){
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return 'Enter your email address.';
+  if (password.length<minLen) return minLen>1 ? `Choose a password of at least ${minLen} characters.` : 'Enter your password.';
+}
+async function authPassword(){
+  const { email, password } = authCreds(), bad = authCheck(email, password, 1);
+  if (bad) { S.auth={...S.auth, email, msg:bad, err:true}; render(); return; }
+  S.auth={step:'email', email, busy:true, msg:''}; render();
+  const { error } = await SB.auth.signInWithPassword({ email, password });
+  if (error) { S.auth={step:'email', email, busy:false, err:true, msg:
+    /confirm/i.test(error.message) ? 'Confirm your email first: tap the link we sent you, then sign in.' :
+    /invalid/i.test(error.message) ? 'Wrong email or password. New here? Tap Create account. Signed in by email link before? Use the link, then set a password under Profile → Account.' :
+    'Couldn’t sign in. Check your connection and try again.' }; render(); }
+}
+async function authSignUp(){
+  const { email, password } = authCreds(), bad = authCheck(email, password, 8);
+  if (bad) { S.auth={...S.auth, email, msg:bad, err:true}; render(); return; }
+  S.auth={step:'email', email, busy:true, msg:''}; render();
+  const { data, error } = await SB.auth.signUp({ email, password, options:{ emailRedirectTo:redirectTo() } });
+  if (error) S.auth={step:'email', email, busy:false, err:true, msg: /rate/i.test(error.message) ? 'Too many emails. Wait a while and try again.' : /password/i.test(error.message) ? error.message : 'Couldn’t create the account. Check the address and try again.'};
+  else if (data.user && !data.user.identities?.length) S.auth={step:'email', email, busy:false, err:true, msg:'That email already has an account. Sign in, or use the email link and then set a password under Profile → Account.'};
+  else if (!data.session) S.auth={step:'confirm', email, busy:false, msg:''};
+  render();
+}
+async function setPassword(){
+  const password = $('#newPass')?.value||'';
+  if (password.length<8) { toast('Choose a password of at least 8 characters.'); return; }
+  const { error } = await SB.auth.updateUser({ password });
+  toast(error ? 'Couldn’t set the password: '+error.message : 'Password set. Use it to sign in on any device, including the home-screen app.');
+  if (!error && $('#newPass')) $('#newPass').value='';
 }
 async function authGoogle(){ await SB.auth.signInWithOAuth({ provider:'google', options:{ redirectTo:redirectTo() } }); }
 async function signOut(){
