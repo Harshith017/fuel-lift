@@ -1,5 +1,5 @@
 /* Fuel & Lift — app. Ported from the claude.ai artifact: storage now goes
-   through backend.js (Supabase + offline cache), Claude through the `claude`
+   through backend.js (Supabase + offline cache), AI through the `claude`
    edge function, and every number through calc.js. */
 (() => {
 'use strict';
@@ -218,10 +218,10 @@ function exerciseKcal(ex, date){
     const minutes = ex.duration_min>0 ? ex.duration_min : 0;
     if (minutes) {
       const e = Calc.workoutEnergy({activity, met:ex.met||(/run|jog/.test(name)?9.8:/walk/.test(name)?3.5:6), minutes, distanceKm:ex.distance_km, inclinePct:ex.incline_pct, avgHr:ex.avg_hr}, w);
-      if (!activity && !ex.avg_hr && !ex.met && ex.kcal_hint>0) { ex.method='Estimated by Claude'; ex.kcal_gross=ex.kcal_hint; return Math.round(Math.max(0, ex.kcal_hint - w.bmrKcal/1440*minutes)); }
+      if (!activity && !ex.avg_hr && !ex.met && ex.kcal_hint>0) { ex.method='Estimated by AI'; ex.kcal_gross=ex.kcal_hint; return Math.round(Math.max(0, ex.kcal_hint - w.bmrKcal/1440*minutes)); }
       ex.method = e.method; ex.kcal_gross = Math.round(e.gross); return Math.round(e.net);
     }
-    if (ex.kcal_hint>0) { ex.method='Estimated by Claude'; return Math.round(ex.kcal_hint); }
+    if (ex.kcal_hint>0) { ex.method='Estimated by AI'; return Math.round(ex.kcal_hint); }
     return 0;
   }
   const sets = ex.sets||[];
@@ -420,18 +420,18 @@ function supplementsPanel(day){
 function guessMeal(){ const h=new Date().getHours(); return h<11?'breakfast':h<16?'lunch':h<19?'snack':'dinner'; }
 const AI_ERR = {
   session_expired:'You’ve been signed out. Sign in again, then log this entry.',
-  daily_cap:'You’ve used today’s Claude allowance. The food table and saved foods still log instantly; Claude is back tomorrow.',
-  not_invited:'Claude features are invite-only on this app. Ask the owner to add your email.',
+  daily_cap:'You’ve used today’s AI allowance. The food table and saved foods still log instantly; AI is back tomorrow.',
+  not_invited:'AI features are invite-only on this app. Ask the owner to add your email.',
   server_config:'The app’s AI key isn’t set up correctly. The owner needs to check the GEMINI_API_KEY or ANTHROPIC_API_KEY secret.',
-  unavailable:'Couldn’t reach Claude. Your entry is still here; try again.',
-  offline:'You’re offline. Food-table items still log; try Claude again when you’re back online.',
-  rate_limited:'Claude is busy right now. Try again in a minute.',
+  unavailable:'Couldn’t reach AI. Your entry is still here; try again.',
+  offline:'You’re offline. Food-table items still log; try AI again when you’re back online.',
+  rate_limited:'AI is busy right now. Try again in a minute.',
   image_rejected:'That file couldn’t be read. Try a JPEG, PNG or PDF under 20 MB.',
-  refused:'Claude couldn’t process that entry. Try describing it differently.',
+  refused:'AI couldn’t process that entry. Try describing it differently.',
   invalid_json:'Couldn’t turn that into a log entry. Try rephrasing, e.g. “150 g paneer, 2 rotis”.',
   empty_completion:'Couldn’t turn that into a log entry. Try rephrasing, e.g. “150 g paneer, 2 rotis”.',
   prompt_too_large:'That entry is too long. Split it into smaller entries.',
-  bad_request:'Claude couldn’t read that request. Try again.',
+  bad_request:'AI couldn’t read that request. Try again.',
 };
 async function toJpeg(file){
   try {
@@ -498,7 +498,7 @@ async function importIndb(file){
     const size = 200; const chunks = Math.ceil(out.length/size);
     for (let i=0;i<chunks;i++) await S.db.doc('foodlib/indb-'+String(i).padStart(2,'0')).set({src:'INDB 2024', part:i, of:chunks, rows:JSON.stringify(out.slice(i*size,(i+1)*size)), saved:Date.now()});
     S.libFoods = out.map(r=>rowToFood(r,'indb')); S.myFoodsVer=(S.myFoodsVer||0)+1;
-    S.libStatus=`Added ${out.length} Indian recipes from INDB. They now log instantly without Claude.`;
+    S.libStatus=`Added ${out.length} Indian recipes from INDB. They now log instantly without AI.`;
   } catch(e) {
     S.libStatus = e?.msg || 'Couldn’t read that file. Make sure it’s INDB.xlsx and try again.';
   } finally { S.libBusy=false; render(); }
@@ -585,8 +585,8 @@ async function submitLog(){
   const restText = local.rest.join(', ');
   const needAI = !!S.photo || restText.length > 0;
   if (needAI && !S.sample) {
-    if (local.foods.length || local.water) { await saveEntry(date, {foods:local.foods, water_ml:local.water}); if (ta) ta.value = restText; setStatus(`Logged what’s in the food table. Claude isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
-    else setStatus('That isn’t in the food table, and Claude isn’t set up for this app yet (see SETUP.md).', true);
+    if (local.foods.length || local.water) { await saveEntry(date, {foods:local.foods, water_ml:local.water}); if ($('#logText')) $('#logText').value = restText; setStatus(`Logged what’s in the food table. AI isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
+    else setStatus('That isn’t in the food table, and AI isn’t set up for this app yet (see SETUP.md).', true);
     return;
   }
   S.busy = true; S.ctl = new AbortController();
@@ -615,15 +615,15 @@ async function submitLog(){
       if (r.supplements.length) bits.push(r.supplements.map(x=>x.name).join(', '));
       if (r.health) bits.push('Health data'+(r.health.steps?` (${n0(r.health.steps)} steps`:' (')+(r.health.sleep_min?`${r.health.steps?', ':''}${fmtSleep(r.health.sleep_min)} sleep`:'')+')');
       for (const a of r.activities) enqueueActivity(a, date);
-      const how = !needAI ? ' From your food table, no Claude used.' : local.foods.length ? ` ${local.foods.length} from your food table, the rest read by Claude.` : aiFoods ? ' Saved to your food list, so next time it’s instant.' : '';
+      const how = !needAI ? ' From your food table, no AI used.' : local.foods.length ? ` ${local.foods.length} from your food table, the rest read by AI.` : aiFoods ? ' Saved to your food list, so next time it’s instant.' : '';
       setStatus(bits.length ? 'Logged ' + bits.join(', ') + '.' + how + (r.notes ? ' ' + r.notes : '') : (r.notes||''));
-      if (ta) ta.value = ''; clearPhoto();
+      if ($('#logText')) $('#logText').value = ''; clearPhoto();
     }
   } catch (e) {
     if (e?.code === 'cancelled') setStatus('Stopped. Nothing was logged.');
     else {
       // Keep whatever the food table understood, even when Claude can't be reached.
-      if (local.foods.length || local.water) { await saveEntry(date, {foods:local.foods, water_ml:local.water}); if (ta) ta.value = restText; }
+      if (local.foods.length || local.water) { await saveEntry(date, {foods:local.foods, water_ml:local.water}); if ($('#logText')) $('#logText').value = restText; }
       setStatus((local.foods.length||local.water ? 'Logged the food-table items. ' : '') + (AI_ERR[e?.code] || AI_ERR.unavailable), true);
     }
   } finally { S.busy=false; S.ctl=null; render(); }
@@ -963,7 +963,7 @@ Rules:
 }
 async function onReportFiles(files){
   if (!files.length) return;
-  if (!S.sample) { S.repStatus='Reading reports needs Claude, which isn’t set up for this app yet.'; render(); return; }
+  if (!S.sample) { S.repStatus='Reading reports needs AI, which isn’t set up for this app yet.'; render(); return; }
   const max = 5;
   S.repBusy=true; S.repStatus='Preparing the report…'; render();
   try {
@@ -1022,7 +1022,7 @@ function viewHealth(){
   const reps = S.reports||[]; const sel = reps.find(r=>r.id===S.repSel) || reps[0]; const p = prof(); const applied = p.report_adjust;
   let h = `<div class="grid">
     <section class="panel" id="reports"><div class="panel-head"><h2>Blood tests</h2><span class="muted small">${reps.length} report${reps.length===1?'':'s'}</span></div>
-      <div class="small">Upload a lab report (PDF, or photos or screenshots of the pages). Claude reads each result, explains what’s out of range, and suggests changes to your eating and training that you can apply to your targets.</div>
+      <div class="small">Upload a lab report (PDF, or photos or screenshots of the pages). AI reads each result, explains what’s out of range, and suggests changes to your eating and training that you can apply to your targets.</div>
       <div class="row"><button class="btn" data-action="pickReport" ${S.repBusy||S.aiState==='off'?'disabled':''}>${S.repBusy?'Working…':'Add a report'}</button><span class="status${/Couldn|No test|needs|can’t/.test(S.repStatus||'')?' err':''}" aria-live="polite">${esc(S.repStatus||'')}</span></div>
       ${applied ? `<div class="banner">Your targets include changes from your ${esc(fmtDate(applied.from_date||localDate(),{day:'numeric',month:'short',year:'numeric'}))} report: ${esc(adjustLines(applied).join('; ')||'highlighted nutrients')}. <button class="linkbtn" data-action="unapplyReport">Remove these changes</button></div>`:''}
     </section>`;
@@ -1380,7 +1380,7 @@ function lineChart({pts, unit, color, wide}){
 /* ---------- views ---------- */
 function loggerHtml(kind){
   const ph = kind==='gym' ? 'e.g. bench 60kg 3x8, lat pulldown 50x12 x10 x10 · badminton doubles 1 hr · cricket nets 90 min, bowled 6 overs, faced 40 balls' : 'e.g. 150g chicken breast, 200g cooked rice, 1 tbsp ghee · 500ml water · bench 60kg 3x8';
-  if (S.aiState==='off') return `<div class="banner">Claude isn’t set up for this app yet, so typed entries only log foods from the food table. Water, editing and everything else work. See SETUP.md to connect Claude.</div>`;
+  if (S.aiState==='off') return `<div class="banner">AI isn’t set up for this app yet, so typed entries only log foods from the food table. Water, editing and everything else work. See SETUP.md to connect one.</div>`;
   return `<section class="panel logger span2" aria-label="Log an entry">
     <div class="panel-head"><h2>${kind==='gym'?'Log training':'Log it'}</h2><span class="muted small">${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'long'}))}</span></div>
     ${queueCard()}
@@ -1394,7 +1394,7 @@ function loggerHtml(kind){
     </div>
     <div class="status${S.statusErr?' err':''}" id="logStatus" aria-live="polite">${esc(S.status)}</div>
     ${kind!=='gym'&&recentFoods().length?`<div class="chips" aria-label="Recent foods"><span class="muted small" style="align-self:center">Log again:</span>${recentFoods().map(f=>`<button class="chip" style="border-style:solid" data-action="relog" data-id="${f.id}">${esc(f.name)}${f.quantity?' · '+esc(f.quantity):''}</button>`).join('')}</div>`:''}
-    <div class="chips" aria-label="Examples">${(kind==='gym'?EXAMPLES.slice(5):EXAMPLES.slice(0,6)).map(x=>`<button class="chip" data-action="example" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+    ${kind==='gym'||!recentFoods().length?`<div class="chips" aria-label="Examples"><span class="muted small" style="align-self:center">Try:</span>${(kind==='gym'?EXAMPLES.slice(5):EXAMPLES.slice(0,6)).map(x=>`<button class="chip" data-action="example" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}
   </section>`;
 }
 function viewToday(){
@@ -1407,15 +1407,25 @@ function viewToday(){
   const glasses = Math.max(Math.ceil(WT/250), Math.ceil(t.water/250));
   return `${!S.profile ? `<div class="banner" style="margin-bottom:16px">Targets below use default numbers. <button class="linkbtn" data-action="goto" data-view="profile">Add your weight, height, age and goal</button> to set your own.</div>`:''}
   ${todayBanners()}
-  <div class="tiles five" style="margin-bottom:16px">
-    <div class="tile"><span class="l">Eaten</span><span class="v">${n0(t.kcal)}</span><span class="delta flat">of ${n0(T.kcal)} kcal</span></div>
-    <div class="tile"><span class="l">Burned${B.restEst||B.actEst?' <span class="tag">est.</span>':''}</span><span class="v">${n0(B.total)}</span><span class="delta ${t.kcal?(bal>0?'up':'down'):'flat'}" style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'surplus +':'deficit −'}${n0(Math.abs(bal))} kcal`:'nothing eaten logged'}</span></div>
-    <div class="tile"><span class="l">Steps</span><span class="v">${H.steps?n0(H.steps):'—'}</span><span class="delta flat">goal ${n0(Number(prof().steps_goal)||10000)}</span></div>
-    <div class="tile"><span class="l">Sleep</span><span class="v">${H.sleep_min?fmtSleep(H.sleep_min):'—'}</span>${sv?`<span class="delta" style="color:var(--${sv.cls})">${sv.label}</span>`:'<span class="delta flat">not logged</span>'}</div>
-    ${(()=>{ const r=latestRecovery(); return `<div class="tile"><span class="l">Recovery</span><span class="v" style="font-size:24px;line-height:1.3">${!r?'—':r.recovering?esc(fmtReady(r.t)):'Ready'}</span><span class="delta flat">${!r?'log a session to see it':r.recovering?'ready for hard training':'fresh for a hard session'}</span></div>`; })()}
-  </div>
   <div class="grid two">
     ${loggerHtml('today')}
+  <div class="tiles five span2">
+    <div class="tile"><span class="l">Eaten</span><span class="v">${n0(t.kcal)}</span><span class="delta flat">of ${n0(T.kcal)} kcal</span></div>
+    <div class="tile"><span class="l">Burned${B.restEst||B.actEst?' <span class="tag">est.</span>':''}</span><span class="v">${n0(B.total)}</span><span class="delta ${t.kcal?(bal>0?'up':'down'):'flat'}" style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'surplus +':'deficit −'}${n0(Math.abs(bal))} kcal`:'nothing eaten logged'}</span></div>
+    <div class="tile hs"><span class="l">Steps</span><span class="v">${H.steps?n0(H.steps):'—'}</span><span class="delta flat">goal ${n0(Number(prof().steps_goal)||10000)}</span></div>
+    <div class="tile hs"><span class="l">Sleep</span><span class="v">${H.sleep_min?fmtSleep(H.sleep_min):'—'}</span>${sv?`<span class="delta" style="color:var(--${sv.cls})">${sv.label}</span>`:'<span class="delta flat">not logged</span>'}</div>
+    ${(()=>{ const r=latestRecovery(); return `<div class="tile"><span class="l">Recovery</span><span class="v" style="font-size:24px;line-height:1.3">${!r?'—':r.recovering?esc(fmtReady(r.t)):'Ready'}</span><span class="delta flat">${!r?'log a session to see it':r.recovering?'ready for hard training':'fresh for a hard session'}</span></div>`; })()}
+  </div>
+    <section class="panel" aria-label="Food">
+      <div class="panel-head"><h2>Food</h2><span class="muted small">${(day.foods||[]).length} item${(day.foods||[]).length===1?'':'s'}</span></div>
+      ${byMeal.length ? byMeal.map(g=>`<div class="meal"><div class="meal-h"><span>${g.m}</span><span class="num">${n0(g.items.reduce((s,f)=>s+f.kcal,0))} kcal</span></div>
+        ${g.items.map(f=>`<div class="item"><div><div class="nm">${esc(f.name)} ${f.confidence!=='high'?`<span class="tag est" title="Estimated portion">est.</span>`:''}${f.source==='photo'?' <span class="tag">photo</span>':''}${f.check?' <span class="tag est" title="Calories don’t match the protein, carbs and fat. Tap Edit to check.">check</span>':''}</div>
+          <div class="sub">${esc(f.quantity||(f.grams?n0(f.grams)+' g':''))} · P ${n0(f.protein)} · C ${n0(f.carbs)} · F ${n0(f.fat)}</div></div>
+          <div class="kc">${n0(f.kcal)}</div>
+          <div class="acts"><button data-action="editFood" data-id="${f.id}" aria-label="Edit ${esc(f.name)}">Edit</button><button data-action="delFood" data-id="${f.id}" aria-label="Delete ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`).join('')
+        : `<div class="empty">Nothing logged yet. Type a meal above, like “2 eggs, 2 slices brown bread, 1 banana”.</div>`}
+    ${(day.foods||[]).length?`<label class="check muted small" style="margin-top:12px"><input type="checkbox" data-action="dayComplete" ${day.incomplete?'':'checked'}> I logged everything I ate on this day (days you untick are left out when your real maintenance is measured)</label>`:''}
+    </section>
     <section class="panel" aria-label="Calories">
       <div class="panel-head"><h2>Energy</h2>${day.weight_kg?`<span class="tag">Weight ${n1(day.weight_kg)} kg</span>`:''}</div>
       <div class="energy">
@@ -1451,26 +1461,16 @@ function viewToday(){
       <div class="panel-head"><h2>Sleep &amp; steps</h2><span class="muted small">from Apple Health</span></div>
       ${healthPanel(H)}
     </section>
-    <section class="panel" aria-label="Food">
-      <div class="panel-head"><h2>Food</h2><span class="muted small">${(day.foods||[]).length} item${(day.foods||[]).length===1?'':'s'}</span></div>
-      ${byMeal.length ? byMeal.map(g=>`<div class="meal"><div class="meal-h"><span>${g.m}</span><span class="num">${n0(g.items.reduce((s,f)=>s+f.kcal,0))} kcal</span></div>
-        ${g.items.map(f=>`<div class="item"><div><div class="nm">${esc(f.name)} ${f.confidence!=='high'?`<span class="tag est" title="Estimated portion">est.</span>`:''}${f.source==='photo'?' <span class="tag">photo</span>':''}${f.check?' <span class="tag est" title="Calories don’t match the protein, carbs and fat. Tap Edit to check.">check</span>':''}</div>
-          <div class="sub">${esc(f.quantity||(f.grams?n0(f.grams)+' g':''))} · P ${n0(f.protein)} · C ${n0(f.carbs)} · F ${n0(f.fat)}</div></div>
-          <div class="kc">${n0(f.kcal)}</div>
-          <div class="acts"><button data-action="editFood" data-id="${f.id}" aria-label="Edit ${esc(f.name)}">Edit</button><button data-action="delFood" data-id="${f.id}" aria-label="Delete ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`).join('')
-        : `<div class="empty">Nothing logged yet. Type a meal above, like “2 eggs, 2 slices brown bread, 1 banana”.</div>`}
-    </section>
-    ${(day.foods||[]).length?`<label class="check span2 muted small" style="margin-top:-8px"><input type="checkbox" data-action="dayComplete" ${day.incomplete?'':'checked'}> I logged everything I ate on this day (days you untick are left out when your real maintenance is measured)</label>`:''}
     <section class="panel" aria-label="Supplements">
       <div class="panel-head"><h2>Supplements</h2><span class="muted small">${(day.supplements||[]).length} taken</span></div>
       ${supplementsPanel(day)}
     </section>
-    ${S.date===localDate()?planCard(true):''}
     <section class="panel" aria-label="Activity">
       <div class="panel-head"><h2>Activity</h2>${t.burned?`<span class="muted small num">${n0(t.burned)} kcal</span>`:''}</div>
       ${activityPanel(day)}
     </section>
-    <section class="panel span2" aria-label="Micronutrients">
+    <details class="panel span2 micros" aria-label="Micronutrients">
+      <summary><h2>Vitamins &amp; minerals</h2><span class="muted small">${(()=>{ const low=MICROS.filter(m=>m.kind!=='limit'&&T.micros[m.key]&&t.micros[m.key]/T.micros[m.key]<0.5).length, over=MICROS.filter(m=>m.kind==='limit'&&T.micros[m.key]&&t.micros[m.key]>T.micros[m.key]).length; return [low?`${low} low`:'', over?`${over} over limit`:''].filter(Boolean).join(' · ')||'Show'; })()}</span></summary>
       <div class="facts">
         <div class="fh">Micronutrients &amp; limits</div>
         <div class="dvh">% of daily target</div>
@@ -1482,7 +1482,7 @@ function viewToday(){
         </div>
       </div>
       <div class="muted small">Targets are adult daily reference intakes for your sex. Values are estimates from food composition tables, so read them as a guide rather than a lab result.</div>
-    </section>
+    </details>
   </div>`;
 }
 function healthPanel(H){
@@ -1630,7 +1630,7 @@ function viewProfile(){
         <label class="field">Date of birth<input id="pf_birth" name="birth" type="date" max="${localDate()}" value="${esc(p.birth||'')}"><span class="hint">${p.birth?`Age ${ageOf(p)}`:`Using age ${esc(p.age)} until you add it`}</span></label>
         <label class="field">Height (cm)<input id="pf_height" name="height_cm" type="number" min="120" max="230" step="0.5" value="${esc(p.height_cm)}"></label>
         <label class="field">Weight (kg)<input id="pf_weight" name="weight_kg" type="number" min="30" max="250" step="0.1" value="${esc(p.weight_kg)}"><span class="hint">Logging “weight 72.4” updates this. Targets use your smoothed trend: ${n1(who(localDate()).kg)} kg.</span></label>
-        <label class="field">Body fat % (optional)<input id="pf_bf" name="body_fat" type="number" min="3" max="60" step="0.1" placeholder="Leave blank if unsure" value="${esc(p.body_fat??'')}"><span class="hint">Only from a DEXA scan or a tape measurement. When set, resting burn uses Katch-McArdle, which accounts for muscle.</span></label>
+        <label class="field">Body fat % (optional)<input id="pf_bf" name="body_fat" type="number" min="3" max="60" step="0.1" placeholder="Optional" value="${esc(p.body_fat??'')}"><span class="hint">Only from a DEXA scan or a tape measurement. When set, resting burn uses Katch-McArdle, which accounts for muscle.</span></label>
         <label class="field full">Daily life, not counting gym and sport<select id="pf_act" name="activity">${opt(ACTIVITY,actId(p.activity))}</select><span class="hint">Your logged gym and sport sessions are added on the day you do them, counted on top of resting only.</span></label>
         <label class="field">Goal<select id="pf_goal" name="goal">${opt(GOALS,p.goal)}</select></label>
         <label class="field">Rate (kg per week)<select id="pf_rate" name="goal_rate">${(p.goal==='gain'?[0.1,0.25,0.5]:[0.25,0.5,0.75,1]).map(r=>`<option value="${r}" ${Number(p.goal_rate)===r?'selected':''}>${r}</option>`).join('')}</select><span class="hint">${(()=>{ const kg=who(localDate()).kg, r=Number(p.goal_rate)||0, pc=r/kg*100; return p.goal==='lose' ? (pc>1?`That’s ${n1(pc)}% of your weight a week, faster than the 0.5–1% that protects muscle.`:`About ${n1(pc)}% of your weight a week.`) : p.goal==='gain' ? 'Slower gains (0.25–0.5% a week) keep fat gain low.' : 'Used for lose and gain.'; })()}</span></label>
@@ -1668,7 +1668,7 @@ function viewProfile(){
       ${sportsProfileHtml()}
       <h3>Your food list</h3>
       <div class="row"><button class="btn ghost sm" data-action="importIndb" ${S.libBusy?'disabled':''}>${(S.libFoods||[]).length?'Re-import INDB.xlsx':'Import 1,014 Indian recipes (INDB.xlsx)'}</button><span class="status${/isn|failed|Couldn|declined|Only|empty|Reconnect/.test(S.libStatus||'')?' err':''}">${esc(S.libStatus||((S.libFoods||[]).length?`${(S.libFoods||[]).length} INDB recipes loaded.`:''))}</span></div>
-      ${(()=>{ const list=Object.entries(S.myFoods||{}).sort((a,b)=>(b[1].updated||0)-(a[1].updated||0)); return `<div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs (${list.filter(x=>x[1].verified).length} corrected by you). These log instantly without Claude.</div>`
+      ${(()=>{ const list=Object.entries(S.myFoods||{}).sort((a,b)=>(b[1].updated||0)-(a[1].updated||0)); return `<div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs (${list.filter(x=>x[1].verified).length} corrected by you). These log instantly without AI.</div>`
         + (list.length?`<div>${list.slice(0,40).map(([k,f])=>`<div class="item"><div><div class="nm">${esc(f.name)}${f.verified?' <span class="tag">corrected</span>':''}</div><div class="sub">${n0(f.per.kcal)} kcal · P ${n1(f.per.protein)} · C ${n1(f.per.carbs)} · F ${n1(f.per.fat)} per 100 g${f.units&&f.units.serving?` · usual ${n0(f.units.serving)} g`:''}</div></div><span></span><div class="acts"><button data-action="rmFood" data-key="${esc(k)}" aria-label="Remove ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`:''); })()}
       <h3>Daily supplements</h3>
       ${(p.stack||[]).length ? `<div>${p.stack.map(st=>`<div class="item"><div><div class="nm">${esc(st.name)}</div><div class="sub">${esc(st.dose)}</div></div><span></span><div class="acts"><button data-action="rmStack" data-id="${st.id}" aria-label="Remove ${esc(st.name)}">Remove</button></div></div>`).join('')}</div>` : `<div class="muted small">None yet. Log a supplement on Today and tap “Add to daily list”.</div>`}
@@ -1973,8 +1973,8 @@ function maintenancePanel(){
 function accountPanel(){
   const u = S.usage;
   return `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Account</h2><span class="muted small">${esc(S.user?.email||'')}</span></div>
-    <div class="kv" style="max-width:460px"><span>Claude</span><b>${!S.sample?'Off in config.js':S.aiHealth==='ok'?'Connected':S.aiHealth?`<span style="color:var(--bad)">${esc(S.aiHealth==='unavailable'?'Can’t reach the claude function':AI_ERR[S.aiHealth]||S.aiHealth)}</span>`:'Checking…'}</b>
-      <span>Claude today</span><b>${u?`${u.count} of ${u.cap} used`:'—'}</b><span>Sync</span><b>${{synced:'Up to date',saving:'Saving…',offline:'Offline',error:'Retrying'}[S.sync]||'—'}${S.db&&S.db.pendingCount()?` · ${S.db.pendingCount()} waiting`:''}</b></div>
+    <div class="kv" style="max-width:460px"><span>AI</span><b>${!S.sample?'Off in config.js':S.aiHealth==='ok'?'Connected':S.aiHealth?`<span style="color:var(--bad)">${esc(S.aiHealth==='unavailable'?'Can’t reach the AI service':AI_ERR[S.aiHealth]||S.aiHealth)}</span>`:'Checking…'}</b>
+      <span>AI uses today</span><b>${u?`${u.count} of ${u.cap} used`:'—'}</b><span>Sync</span><b>${{synced:'Up to date',saving:'Saving…',offline:'Offline',error:'Retrying'}[S.sync]||'—'}${S.db&&S.db.pendingCount()?` · ${S.db.pendingCount()} waiting`:''}</b></div>
     <div class="row"><input id="newPass" type="password" autocomplete="new-password" placeholder="New password (8+ characters)" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:7px 10px"><button class="btn ghost sm" data-action="setPassword">Set password</button></div>
     <div class="row"><button class="btn ghost sm" data-action="exportData">Download backup</button><button class="btn ghost sm" data-action="importData">Restore from backup</button><span class="spacer"></span><button class="btn ghost sm" data-action="signOut">Sign out</button></div>
     <div class="muted small">A backup is one JSON file with everything: days, profile, foods, reports, plans and reviews. Restoring also accepts an export from the claude.ai version of Fuel &amp; Lift.</div></section>`;
