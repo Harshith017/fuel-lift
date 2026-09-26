@@ -1441,9 +1441,9 @@ function exerciseDetail(r){
 }
 /* ---------- shared bits for the new layout ---------- */
 // How a value sits against its target, and the colour for it.
-//   'range': aim for the target (calories, carbs): under → yellow, within 10% → Kelly, over → red
-//   'more' : more is fine (protein, fibre, water, steps, sleep, vitamins): over → Forest instead of red
-//   'limit': stay under (sugar, sodium, saturated fat…): up to the limit → Kelly, over → red
+//   'range': aim for the target (calories, carbs): under → orange, within 10% → violet, over → red
+//   'more' : more is fine (protein, fibre, water, steps, sleep, vitamins): over → blue instead of red
+//   'limit': stay under (sugar, sodium, saturated fat…): up to the limit → violet, over → red
 function goalState(v, target, kind){
   if (!(target>0)) return 'plus';
   const r = v/target;
