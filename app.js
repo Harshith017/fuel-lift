@@ -1,4 +1,4 @@
-/* Fuel & Lift — app. Ported from the claude.ai artifact: storage now goes
+/* MaxxTempo — app. Ported from the claude.ai artifact: storage now goes
    through backend.js (Supabase + offline cache), AI through the `claude`
    edge function, and every number through calc.js. */
 (() => {
@@ -1693,7 +1693,7 @@ function dataFold(){
   return `<div class="row"><button class="btn sm" data-action="exportExcel" ${S.xlsBusy?'disabled':''}>${S.xlsBusy?'Preparing…':'Download all my data (Excel)'}</button></div>
     <div class="muted small">One spreadsheet with a sheet each for daily totals, food, gym sets, sport, supplements and blood tests.</div>
     <div class="row"><button class="btn ghost sm" data-action="exportData">Download backup (JSON)</button><button class="btn ghost sm" data-action="importData">Restore from backup</button></div>
-    <div class="muted small">The backup file can be restored into this app later. Restoring also accepts an export from the claude.ai version.</div>`;
+    <div class="muted small">The backup file can be restored into this app later. Restoring also accepts a Fuel &amp; Lift backup or an export from the claude.ai version.</div>`;
 }
 function securityFold(){
   return `<div class="muted small">Signed in as ${esc(S.user?.email||'')}. Set or change the password you use to sign in (including on the home-screen app).</div>
@@ -1787,7 +1787,7 @@ async function exportExcel(){
     const wb = XLSX.utils.book_new();
     for (const [name, rows] of [['Daily',summary],['Food',food],['Gym',gym],['Sport',sport],['Supplements',supps],['Blood tests',blood]])
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length?rows:[{Note:'Nothing logged yet'}]), name);
-    XLSX.writeFile(wb, `fuel-lift-${localDate()}.xlsx`);
+    XLSX.writeFile(wb, `maxxtempo-${localDate()}.xlsx`);
   } catch(e) { toast(e?.msg || 'Couldn’t build the spreadsheet. Try again.'); }
   finally { S.xlsBusy=false; render(); }
 }
@@ -2114,16 +2114,16 @@ function maintenancePanel(){
 }
 function exportData(){
   const blob = new Blob([JSON.stringify({app:'fuel-lift', v:1, exported:new Date().toISOString(), docs:S.db.dump()}, null, 1)], {type:'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `fuel-lift-backup-${localDate()}.json`;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `maxxtempo-backup-${localDate()}.json`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 async function importData(file){
-  let j; try { j = JSON.parse(await file.text()); } catch { toast('That file isn’t a Fuel & Lift backup.'); return; }
+  let j; try { j = JSON.parse(await file.text()); } catch { toast('That file isn’t a MaxxTempo backup.'); return; }
   // Accepts our own backups ({docs:{collection:{id:data}}}) or a plain {collection:{id:data}} / {collection:[{id,...}]} export.
   const docs = j && j.docs ? j.docs : j;
   const OK = ['days','profile','foods','reports','plans','reviews','foodlib'];
   let n = 0;
-  if (!docs || typeof docs!=='object') { toast('That file isn’t a Fuel & Lift backup.'); return; }
+  if (!docs || typeof docs!=='object') { toast('That file isn’t a MaxxTempo backup.'); return; }
   if (!confirm('Add everything in this backup to your account? Days with the same date are replaced.')) return;
   for (const c of OK) {
     const coll = docs[c]; if (!coll) continue;
@@ -2136,7 +2136,7 @@ async function importData(file){
 let SB = null;
 function authView(){
   const a = S.auth, cfgOk = window.FL_CONFIG && /^https:\/\//.test(FL_CONFIG.SUPABASE_URL||'') && FL_CONFIG.SUPABASE_ANON_KEY && !/YOUR_/.test(FL_CONFIG.SUPABASE_ANON_KEY);
-  if (!cfgOk) return `<section class="panel setup"><h2>Almost there</h2><p>This copy of Fuel &amp; Lift isn’t connected to a database yet. Put your Supabase project URL and anon key in <b>config.js</b>, following SETUP.md.</p></section>`;
+  if (!cfgOk) return `<section class="panel setup"><h2>Almost there</h2><p>This copy of MaxxTempo isn’t connected to a database yet. Put your Supabase project URL and anon key in <b>config.js</b>, following SETUP.md.</p></section>`;
   if (a.step==='confirm') return `<section class="panel setup"><h2>Confirm your email</h2>
     <p>We sent a confirmation link to <b>${esc(a.email)}</b>. Tap it once (any browser is fine), then come back here and sign in with your password.</p>
     <div class="row"><span class="spacer"></span><button class="btn" data-action="authBack">Back to sign in</button></div></section>`;

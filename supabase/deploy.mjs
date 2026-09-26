@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fuel & Lift — one-shot setup of an existing Supabase project.
+// MaxxTempo — one-shot setup of an existing Supabase project.
 //
 //   SUPABASE_ACCESS_TOKEN=... ANTHROPIC_API_KEY=... node supabase/deploy.mjs [project-ref-or-name]
 //
@@ -80,9 +80,9 @@ console.log(`    site ${APP_URL}`);
 // sign-in links still work, but the code needs custom SMTP (SETUP.md step 1.4).
 try {
   await api('PATCH', `/projects/${ref}/config/auth`, {
-    mailer_subjects_magic_link: 'Your Fuel & Lift sign-in code',
+    mailer_subjects_magic_link: 'Your MaxxTempo sign-in code',
     mailer_templates_magic_link_content:
-      '<h2>Fuel &amp; Lift</h2><p>Your sign-in code:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">{{ .Token }}</p>' +
+      '<h2>MaxxTempo</h2><p>Your sign-in code:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">{{ .Token }}</p>' +
       '<p>Type it in the app, or <a href="{{ .ConfirmationURL }}">tap here</a> on the device you’re signing in on.</p>',
   });
   console.log('    sign-in email shows a code');

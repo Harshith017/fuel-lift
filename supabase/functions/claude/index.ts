@@ -1,4 +1,4 @@
-// Fuel & Lift — the only place that talks to the AI model (Claude or Gemini).
+// MaxxTempo — the only place that talks to the AI model (Claude or Gemini).
 // The web page sends {task, prompt, images?, documents?}; this function checks
 // the person is signed in (and invited, if invites are on), applies a daily
 // cap, calls the model chosen for that task, and returns parsed JSON.

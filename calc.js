@@ -1,4 +1,4 @@
-/* Fuel & Lift — calculation engine.
+/* MaxxTempo — calculation engine.
    Every number the app shows comes from here, so it is kept free of DOM code
    and covered by calc.test.js (run: node --test calc.test.js).
 

@@ -1,4 +1,4 @@
-/* Fuel & Lift — your project's settings. Both values are safe to publish:
+/* MaxxTempo — your project's settings. Both values are safe to publish:
    the anon key only works together with the database's row-level security,
    which lets each person read and write their own data and nothing else.
    Find them in Supabase → Project Settings → API. */
