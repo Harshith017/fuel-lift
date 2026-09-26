@@ -1,13 +1,17 @@
-// Fuel & Lift — the only place that talks to Claude.
+// Fuel & Lift — the only place that talks to the AI model (Claude or Gemini).
 // The web page sends {task, prompt, images?, documents?}; this function checks
 // the person is signed in (and invited, if invites are on), applies a daily
-// cap, calls Claude with the model chosen for that task, and returns parsed JSON.
+// cap, calls the model chosen for that task, and returns parsed JSON.
 //
 // Secrets (Supabase → Edge Functions → Secrets):
-//   ANTHROPIC_API_KEY   required
-//   DAILY_CAP           optional, Claude actions per person per day (default 30)
+//   ANTHROPIC_API_KEY   Claude (paid). One of this or GEMINI_API_KEY is required.
+//   GEMINI_API_KEY      Google Gemini (free tier at aistudio.google.com). Used when set.
+//   AI_PROVIDER         optional, "claude" or "gemini" when both keys are set (default gemini)
+//   DAILY_CAP           optional, AI actions per person per day (default 30)
 //   MODEL_SMART         optional, default claude-sonnet-5
 //   MODEL_QUICK         optional, default claude-haiku-4-5
+//   GEMINI_MODEL_SMART  optional, default gemini-3.8-flash
+//   GEMINI_MODEL_QUICK  optional, default gemini-3.5-flash-lite
 //   ALLOWED_ORIGIN      optional, e.g. https://fuel-lift.vercel.app (default *)
 //   APP_TIMEZONE        optional, when the daily cap resets (default Asia/Kolkata)
 // SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are provided automatically.
@@ -17,23 +21,27 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const anthropic = API_KEY ? new Anthropic({ apiKey: API_KEY }) : null;
+const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY");
+const PROVIDER = (Deno.env.get("AI_PROVIDER") === "claude" && anthropic) || !GEMINI_KEY ? (anthropic ? "claude" : null) : "gemini";
 const TIMEZONE = Deno.env.get("APP_TIMEZONE") ?? "Asia/Kolkata";
 const DAILY_CAP = Number(Deno.env.get("DAILY_CAP") ?? 30);
 const MODEL_SMART = Deno.env.get("MODEL_SMART") ?? "claude-sonnet-5";
 const MODEL_QUICK = Deno.env.get("MODEL_QUICK") ?? "claude-haiku-4-5";
+const GEMINI_SMART = Deno.env.get("GEMINI_MODEL_SMART") ?? "gemini-3.8-flash";
+const GEMINI_QUICK = Deno.env.get("GEMINI_MODEL_QUICK") ?? "gemini-3.5-flash-lite";
 const ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 
 // Which model and how much thinking each job gets. Chosen here, not by the
 // page, so nobody can switch every request to the most expensive setting.
-type Tier = { model: string; effort?: "low" | "medium" | "high"; maxTokens: number };
+type Tier = { smart: boolean; effort?: "low" | "medium" | "high"; maxTokens: number };
 const TASKS: Record<string, Tier> = {
-  log:        { model: MODEL_SMART, effort: "medium", maxTokens: 16000 }, // food / gym / health entries, photos
-  coach:      { model: MODEL_SMART, effort: "medium", maxTokens: 16000 }, // sport session calories + recovery
-  plan:       { model: MODEL_SMART, effort: "medium", maxTokens: 16000 }, // next session
-  review:     { model: MODEL_SMART, effort: "medium", maxTokens: 16000 }, // weekly review
-  report:     { model: MODEL_SMART, effort: "medium", maxTokens: 12000 }, // blood tests (kept under the function time limit)
-  ideas:      { model: MODEL_QUICK, maxTokens: 4000 },                    // meal ideas
-  questions:  { model: MODEL_QUICK, maxTokens: 4000 },                    // sport profile questions
+  log:        { smart: true, effort: "medium", maxTokens: 16000 }, // food / gym / health entries, photos
+  coach:      { smart: true, effort: "medium", maxTokens: 16000 }, // sport session calories + recovery
+  plan:       { smart: true, effort: "medium", maxTokens: 16000 }, // next session
+  review:     { smart: true, effort: "medium", maxTokens: 16000 }, // weekly review
+  report:     { smart: true, effort: "medium", maxTokens: 12000 }, // blood tests (kept under the function time limit)
+  ideas:      { smart: false, maxTokens: 4000 },                   // meal ideas
+  questions:  { smart: false, maxTokens: 4000 },                   // sport profile questions
 };
 
 const SYSTEM = "You are the analysis engine inside a personal fitness and nutrition tracker. " +
@@ -63,6 +71,30 @@ function extractJson(text: string): unknown {
   return JSON.parse(t.slice(start, end + 1));
 }
 
+// Gemini over REST. Returns the reply text, or throws {status, reason}.
+async function callGemini(model: string, maxTokens: number, prompt: string,
+  images: { media_type: string; data: string }[], documents: { media_type: string; data: string }[]) {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "x-goog-api-key": GEMINI_KEY!, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM }] },
+      contents: [{ role: "user", parts: [
+        ...documents.map((d) => ({ inlineData: { mimeType: "application/pdf", data: d.data } })),
+        ...images.map((i) => ({ inlineData: { mimeType: i.media_type, data: i.data } })),
+        { text: prompt },
+      ] }],
+      generationConfig: { maxOutputTokens: maxTokens, responseMimeType: "application/json" },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw { status: res.status, reason: JSON.stringify(data?.error ?? {}) };
+  const cand = data.candidates?.[0];
+  if (data.promptFeedback?.blockReason || /SAFETY|PROHIBITED|BLOCKLIST|SPII/.test(cand?.finishReason ?? "")) return { refused: true, text: "", model };
+  const text = (cand?.content?.parts ?? []).filter((p: { text?: string; thought?: boolean }) => p.text && !p.thought).map((p: { text: string }) => p.text).join("");
+  return { refused: false, text, model: data.modelVersion ?? model };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return fail(405, "method_not_allowed");
@@ -90,10 +122,10 @@ Deno.serve(async (req) => {
 
   if (body.task === "usage") {
     const { data } = await admin.from("ai_usage").select("count").eq("user_id", user.id).eq("day", day).maybeSingle();
-    return reply(200, { ok: true, ready: !!anthropic, usage: { count: data?.count ?? 0, cap: DAILY_CAP } });
+    return reply(200, { ok: true, ready: !!PROVIDER, provider: PROVIDER, usage: { count: data?.count ?? 0, cap: DAILY_CAP } });
   }
 
-  if (!anthropic) return fail(500, "server_config");
+  if (!PROVIDER) return fail(500, "server_config");
   const tier = TASKS[body.task ?? ""];
   if (!tier) return fail(400, "bad_task");
   const prompt = String(body.prompt ?? "");
@@ -120,6 +152,25 @@ Deno.serve(async (req) => {
   const usage = { count: used as number, cap: DAILY_CAP };
   const refund = () => admin.rpc("refund_ai_usage", { p_user: user.id, p_day: day });
 
+  if (PROVIDER === "gemini") {
+    try {
+      const out = await callGemini(tier.smart ? GEMINI_SMART : GEMINI_QUICK, tier.maxTokens, prompt, images, documents);
+      if (out.refused) { await refund(); return fail(422, "refused", { usage }); }
+      if (!out.text.trim()) return fail(502, "empty_completion", { usage });
+      let json: unknown;
+      try { json = extractJson(out.text); } catch { return fail(502, "invalid_json", { usage }); }
+      return reply(200, { ok: true, json, usage, model: out.model });
+    } catch (e) {
+      await refund();
+      const { status, reason } = (e ?? {}) as { status?: number; reason?: string };
+      console.error("gemini", status, reason);
+      if (status === 429) return fail(429, "rate_limited", { usage });
+      if (status === 401 || status === 403 || status === 404 || /API_KEY/.test(reason ?? "")) return fail(500, "server_config");
+      if (status === 400) return fail(400, images.length || documents.length ? "image_rejected" : "bad_request");
+      return fail(503, "unavailable");
+    }
+  }
+
   const content: Anthropic.ContentBlockParam[] = [
     ...documents.map((d) => ({ type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: d.data } })),
     ...images.map((i) => ({ type: "image" as const, source: { type: "base64" as const, media_type: i.media_type as "image/jpeg", data: i.data } })),
@@ -127,8 +178,8 @@ Deno.serve(async (req) => {
   ];
 
   try {
-    const stream = anthropic.messages.stream({
-      model: tier.model,
+    const stream = anthropic!.messages.stream({
+      model: tier.smart ? MODEL_SMART : MODEL_QUICK,
       max_tokens: tier.maxTokens,
       system: SYSTEM,
       ...(tier.effort ? { output_config: { effort: tier.effort } } : {}),

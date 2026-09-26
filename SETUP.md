@@ -41,6 +41,15 @@ The manual steps below do the same thing by hand.
 
 Until this is done the app still works: the built-in food table (130 foods), your saved foods, water, weight and editing all run without Claude. Set `CLAUDE: false` in `config.js` to hide the Claude features until then.
 
+### Free option: Gemini instead of Claude
+
+The same function can use Google's Gemini, which has a free tier:
+1. At [aistudio.google.com](https://aistudio.google.com) → **Get API key** → create a key (no billing needed).
+2. Supabase → **Edge Functions → Secrets**: add `GEMINI_API_KEY`. The function uses Gemini whenever this is set (set `AI_PROVIDER=claude` to prefer Claude while both keys exist).
+3. Optional: `GEMINI_MODEL_SMART` / `GEMINI_MODEL_QUICK` (default `gemini-3.8-flash` / `gemini-3.5-flash-lite`).
+
+Things to know: on the free tier Google may use what you send (food logs, photos, blood-test reports) to improve its products, and people may review it; the paid tier doesn't. Free-tier requests are rate-limited per minute and per day (see AI Studio), so heavy use may hit "busy, try again". Estimates can differ from Claude's.
+
 ## 3. Hosting
 
 Any static host works: upload this folder.

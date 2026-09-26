@@ -63,11 +63,11 @@ console.log('    deployed');
 
 // 4. Secrets
 step(4, 'Storing the function secrets');
-const secrets = [['ANTHROPIC_API_KEY', process.env.ANTHROPIC_API_KEY], ['ALLOWED_ORIGIN', new URL(APP_URL).origin],
+const secrets = [['ANTHROPIC_API_KEY', process.env.ANTHROPIC_API_KEY], ['GEMINI_API_KEY', process.env.GEMINI_API_KEY], ['ALLOWED_ORIGIN', new URL(APP_URL).origin],
   ['DAILY_CAP', process.env.DAILY_CAP], ['APP_TIMEZONE', process.env.APP_TIMEZONE]].filter(([, v]) => v);
 await api('POST', `/projects/${ref}/secrets`, secrets.map(([name, value]) => ({ name, value })));
 console.log(`    ${secrets.map(s => s[0]).join(', ')}`);
-if (!process.env.ANTHROPIC_API_KEY) console.log('    ANTHROPIC_API_KEY not set: the app works, Claude features wait until it is added.');
+if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) console.log('    No ANTHROPIC_API_KEY or GEMINI_API_KEY: the app works, AI features wait until one is added.');
 
 // 5. Sign-in
 step(5, 'Setting up email-code sign-in');
