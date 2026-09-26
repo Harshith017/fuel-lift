@@ -1440,6 +1440,20 @@ function exerciseDetail(r){
   </section>`;
 }
 /* ---------- shared bits for the new layout ---------- */
+// How a value sits against its target, and the colour for it.
+//   'range': aim for the target (calories, carbs): under → yellow, within 10% → Kelly, over → red
+//   'more' : more is fine (protein, fibre, water, steps, sleep, vitamins): over → Forest instead of red
+//   'limit': stay under (sugar, sodium, saturated fat…): up to the limit → Kelly, over → red
+function goalState(v, target, kind){
+  if (!(target>0)) return 'plus';
+  const r = v/target;
+  if (kind==='limit') return r<=1 ? 'at' : 'over';
+  if (r<0.9) return 'under';
+  if (r<=1.1) return 'at';
+  return kind==='more' ? 'plus' : 'over';
+}
+const stBar = st => `var(--st-${st})`, stText = st => `var(--st-${st}-t)`;
+function stateKey(){ return `<div class="stkey"><span><i style="background:var(--st-under)"></i>below target</span><span><i style="background:var(--st-at)"></i>on target</span><span><i style="background:var(--st-over)"></i>over</span><span><i style="background:var(--st-plus)"></i>over, and that’s fine</span></div>`; }
 // A row that folds open. Open state survives re-renders (S.openFolds).
 function fold(key, title, sub, body, cls=''){
   return `<details class="fold${cls?' '+cls:''}" data-fold="${esc(key)}" ${S.openFolds.has(key)?'open':''}><summary><span class="ttl">${title}</span>${sub?`<span class="muted small sub">${sub}</span>`:''}</summary><div class="fold-body">${body}</div></details>`;
@@ -1450,10 +1464,10 @@ function spark(vals, color){
   const pts = v.map((x,i)=>`${(i/(v.length-1)*(W-4)+2).toFixed(1)},${(H-3-(x-lo)/r*(H-6)).toFixed(1)}`).join(' ');
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
-function dashCell(label, pctV, value, color, limit=false, extra=''){
-  const over = limit && pctV>100;
-  return `<div class="dcell"><span class="l">${label}</span><span class="p${over?' bad':''}">${Math.round(pctV)}<small>%</small></span>
-    <div class="meter${over?' over':''}"><i style="width:${Math.min(100,pctV)}%;${over?'':`background:${color}`}"></i></div><span class="val">${value}</span>${extra}</div>`;
+function dashCell(label, v, target, value, kind, hasData=true){
+  const pctV = target>0 ? v/target*100 : 0, st = hasData ? goalState(v, target, kind) : null;
+  return `<div class="dcell"><span class="l">${label}</span><span class="p"${st?` style="color:${stText(st)}"`:''}>${hasData?Math.round(pctV):'—'}${hasData?'<small>%</small>':''}</span>
+    <div class="meter"><i style="width:${Math.min(100,pctV)}%;background:${st?stBar(st):'var(--ink-3)'}"></i></div><span class="val">${value}</span></div>`;
 }
 
 /* ---------- Today ---------- */
@@ -1465,17 +1479,18 @@ function viewToday(){
   const WT = waterTarget(day, T), goal = Number(prof().steps_goal)||10000;
   const P = (v,tg) => tg>0 ? v/tg*100 : 0;
   const hasTraining = (day.sports||[]).length || (day.exercises||[]).length;
+  const hasFood = (day.foods||[]).length>0;
   return `${!S.profile ? `<div class="banner" style="margin-bottom:16px">Targets below use default numbers. <button class="linkbtn" data-action="goto" data-view="profile">Add your weight, height, age and goal</button> to set your own.</div>`:''}
   ${todayBanners()}
   <div class="grid">
     <section class="panel dash" aria-label="Today at a glance">
       <div class="dgrid">
-        ${dashCell('Calories', P(t.kcal,T.kcal), `${n0(t.kcal)} / ${n0(T.kcal)} kcal`, 'var(--accent)', true)}
-        ${dashCell('Protein', P(t.protein,T.protein), `${n0(t.protein)} / ${n0(T.protein)} g`, 'var(--protein)')}
-        ${dashCell('Carbs', P(t.carbs,T.carbs), `${n0(t.carbs)} / ${n0(T.carbs)} g`, 'var(--carbs)')}
-        ${dashCell('Fibre', P(t.fiber,T.fiber), `${n0(t.fiber)} / ${n0(T.fiber)} g`, 'var(--ink-2)')}
-        ${dashCell('Sugar', P(t.sugar,T.sugar), `${n0(t.sugar)} / ≤${n0(T.sugar)} g`, 'var(--ink-2)', true)}
-        <div class="dcell"><span class="l">Burned</span><span class="p">${n0(B.total)}</span><span class="val">kcal${B.restEst||B.actEst?' (est.)':''}${t.burned?` · ${n0(t.burned)} training`:''}</span>
+        ${dashCell('Calories', t.kcal, T.kcal, `${n0(t.kcal)} / ${n0(T.kcal)} kcal`, 'range', hasFood)}
+        ${dashCell('Protein', t.protein, T.protein, `${n0(t.protein)} / ${n0(T.protein)} g`, 'more', hasFood)}
+        ${dashCell('Carbs', t.carbs, T.carbs, `${n0(t.carbs)} / ${n0(T.carbs)} g`, 'range', hasFood)}
+        ${dashCell('Fibre', t.fiber, T.fiber, `${n0(t.fiber)} / ${n0(T.fiber)} g`, 'more', hasFood)}
+        ${dashCell('Sugar', t.sugar, T.sugar, `${n0(t.sugar)} / ≤${n0(T.sugar)} g`, 'limit', hasFood)}
+        <div class="dcell"><span class="l">Burned</span><span class="p" style="color:${stText('plus')}">${n0(B.total)}</span><span class="val">kcal${B.restEst||B.actEst?' (est.)':''}${t.burned?` · ${n0(t.burned)} training`:''}</span>
           <span class="val" style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'surplus +':'deficit −'}${n0(Math.abs(bal))}`:''}</span></div>
       </div>
     </section>
@@ -1494,12 +1509,11 @@ function viewToday(){
     </section>
     <section class="panel" aria-label="Water, steps and sleep">
       <div class="dgrid three">
-        <div class="dcell"><span class="l">Water</span><span class="p" style="color:var(--water)">${Math.round(P(t.water,WT))}<small>%</small></span>
-          <div class="meter"><i style="width:${Math.min(100,P(t.water,WT))}%;background:var(--water)"></i></div><span class="val">${n1(t.water/1000)} / ${n1(WT/1000)} L</span></div>
-        <div class="dcell"><span class="l">Steps</span><span class="p">${H.steps?Math.round(P(H.steps,goal)):'—'}${H.steps?'<small>%</small>':''}</span>
-          <div class="meter"><i style="width:${Math.min(100,P(H.steps||0,goal))}%;background:var(--water)"></i></div><span class="val">${H.steps?n0(H.steps):'0'} / ${n0(goal)}</span></div>
-        <div class="dcell"><span class="l">Sleep</span><span class="p">${H.sleep_min?fmtSleep(H.sleep_min).replace(' ','<small> </small>'):'—'}</span>
-          <span class="val"${sv?` style="color:var(--${sv.cls})"`:''}>${sv?sv.label:'not logged'}</span></div>
+        ${dashCell('Water', t.water, WT, `${n1(t.water/1000)} / ${n1(WT/1000)} L`, 'more', t.water>0)}
+        ${dashCell('Steps', H.steps||0, goal, `${H.steps?n0(H.steps):'0'} / ${n0(goal)}`, 'more', !!H.steps)}
+        ${(()=>{ const st = H.sleep_min ? goalState(H.sleep_min, 420, 'more') : null;
+          return `<div class="dcell"><span class="l">Sleep</span><span class="p"${st?` style="color:${stText(st)}"`:''}>${H.sleep_min?fmtSleep(H.sleep_min).replace(' ','<small> </small>'):'—'}</span>
+          <div class="meter"><i style="width:${Math.min(100,(H.sleep_min||0)/420*100)}%;background:${st?stBar(st):'var(--ink-3)'}"></i></div><span class="val">${sv?sv.label:'not logged'} · aim 7 h+</span></div>`; })()}
       </div>
       <div class="row">${[250,500,750].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml} ml</button>`).join('')}
         ${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Undo</button>`:''}</div>
@@ -1561,49 +1575,52 @@ function viewGym(){
 }
 
 /* ---------- Trends ---------- */
-function weekBars(rows, get, fmt, color, target, higherIsGood=true){
+function weekBars(rows, get, fmt, kind, target){
   const vals = rows.map(r=>get(r)); const have = vals.filter(v=>v>0);
   const max = Math.max(target||0, ...vals, 1)*1.05;
   const avg = have.length ? have.reduce((s,v)=>s+v,0)/have.length : 0;
-  return {avg, html:`<div class="wbars">${rows.map((r,i)=>{ const v=vals[i]; const h=v>0?Math.max(4, v/max*100):0; const hit = target? (higherIsGood ? v>=target*0.9 : v<=target) : true;
-    return `<div class="wb" data-tip="${esc(fmtDate(r.date)+': '+(v>0?fmt(v):'nothing logged'))}"><span class="wv">${v>0?fmt(v,true):''}</span><div class="wtrack">${target?`<i class="wt" style="bottom:${target/max*100}%"></i>`:''}<i class="wfill" style="height:${h}%;background:${v>0&&!hit&&target?'var(--ink-3)':color}"></i></div><span class="wd${r.date===localDate()?' now':''}">${esc(fmtDate(r.date,{weekday:'narrow'}))}</span></div>`; }).join('')}</div>`};
+  return {avg, html:`<div class="wbars">${rows.map((r,i)=>{ const v=vals[i]; const h=v>0?Math.max(4, v/max*100):0; const st = goalState(v, target, kind);
+    return `<div class="wb" data-tip="${esc(fmtDate(r.date)+': '+(v>0?fmt(v):'nothing logged'))}"><span class="wv">${v>0?fmt(v,true):''}</span><div class="wtrack">${target?`<i class="wt" style="bottom:${target/max*100}%"></i>`:''}<i class="wfill" style="height:${h}%;background:${stBar(st)}"></i></div><span class="wd${r.date===localDate()?' now':''}">${esc(fmtDate(r.date,{weekday:'narrow'}))}</span></div>`; }).join('')}</div>`};
 }
 function viewTrends(){
   const rows = Array.from({length:7},(_,i)=>{ const date=addDays(S.date, i-6); const d=S.days.get(date); return {date, d, t:d?dayTotals(d):null, T:d?dayTargets(d):targets(date)}; });
   const T = targets(); const goal = Number(prof().steps_goal)||10000;
   const k = v => v>=10000 ? n1(v/1000)+'k' : n0(v);
   const metrics = [
-    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--accent)', T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
-    ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'var(--protein)', T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
-    ['Burned', r=>r.d?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'var(--carbs)', 0, v=>`${n0(v)} kcal`, 'resting + daily life + training'],
-    ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'var(--fat)', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
-    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'var(--water)', goal, v=>n0(v), `goal ${n0(goal)}`],
-    ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>s?n1(v):`${n1(v)} L`, 'var(--water)', T.water_ml/1000, v=>`${n1(v)} L`, `target ${n1(T.water_ml/1000)} L`],
+    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'range', T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
+    ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'more', T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
+    ['Burned', r=>r.d?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'more', 0, v=>`${n0(v)} kcal`, 'resting + daily life + training'],
+    ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'more', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
+    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'more', goal, v=>n0(v), `goal ${n0(goal)}`],
+    ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>s?n1(v):`${n1(v)} L`, 'more', T.water_ml/1000, v=>`${n1(v)} L`, `target ${n1(T.water_ml/1000)} L`],
   ];
   const day = getDay(S.date), dt = dayTotals(day), DT = dayTargets(day);
   const microsHtml = `<div class="facts"><div class="dvh">% of daily target · ${esc(fmtDate(S.date,{weekday:'long',day:'numeric',month:'short'}))}</div>
       <div class="grid two" style="gap:0 24px">
       ${MICROS.map(m=>{ const v=dt.micros[m.key], tg=DT.micros[m.key]; const p=tg?v/tg*100:0; const lim=m.kind==='limit';
-        const cls = lim ? (p>100?'over':'') : (p>=100?'':p<50?'low':'');
-        return `<div class="fr"><b>${m.label}${lim?' <span class="muted small">(limit)</span>':''}${(DT.focus||[]).includes(m.key)?' <span class="tag est">blood test</span>':''}</b><span class="amt">${fmtAmt(v,m.unit)} ${m.unit}</span><span class="dv ${cls}">${Math.round(p)}%</span>
-          <div class="bar"><i class="${lim&&p>100?'over':!lim&&p>=100?'done':''}" style="width:${Math.min(100,p)}%"></i></div></div>`; }).join('')}
+        const st = goalState(v, tg, lim?'limit':'more');
+        return `<div class="fr"><b>${m.label}${lim?' <span class="muted small">(limit)</span>':''}${(DT.focus||[]).includes(m.key)?' <span class="tag est">blood test</span>':''}</b><span class="amt">${fmtAmt(v,m.unit)} ${m.unit}</span><span class="dv" style="color:${stText(st)}">${Math.round(p)}%</span>
+          <div class="bar"><i style="width:${Math.min(100,p)}%;background:${stBar(st)}"></i></div></div>`; }).join('')}
       </div></div>
     <div class="muted small">Includes your supplements. Targets are adult daily reference intakes for your sex; values are estimates from food tables, so read them as a guide.</div>`;
   const low = MICROS.filter(m=>m.kind!=='limit'&&DT.micros[m.key]&&dt.micros[m.key]/DT.micros[m.key]<0.5).length;
   // targets reached, day by day
   const checks = [
-    ['Calories on target', r=>r.t&&r.t.kcal ? Math.abs(r.t.kcal-r.T.kcal)<=r.T.kcal*0.1 : null],
-    ['Protein', r=>r.t&&r.t.kcal ? r.t.protein>=r.T.protein*0.9 : null],
-    ['Fibre', r=>r.t&&r.t.kcal ? r.t.fiber>=r.T.fiber*0.9 : null],
-    ['Sugar under limit', r=>r.t&&r.t.kcal ? r.t.sugar<=r.T.sugar : null],
-    ['Water', r=>r.t&&r.t.water ? r.t.water>=waterTarget(r.d,r.T) : null],
-    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps ? r.d.health.steps>=goal : null],
-    ['Sleep 7 h+', r=>r.d&&r.d.health&&r.d.health.sleep_min ? r.d.health.sleep_min>=420 : null],
+    ['Calories', r=>r.t&&r.t.kcal ? goalState(r.t.kcal, r.T.kcal, 'range') : null],
+    ['Protein', r=>r.t&&r.t.kcal ? goalState(r.t.protein, r.T.protein, 'more') : null],
+    ['Carbs', r=>r.t&&r.t.kcal ? goalState(r.t.carbs, r.T.carbs, 'range') : null],
+    ['Fibre', r=>r.t&&r.t.kcal ? goalState(r.t.fiber, r.T.fiber, 'more') : null],
+    ['Sugar (limit)', r=>r.t&&r.t.kcal ? goalState(r.t.sugar, r.T.sugar, 'limit') : null],
+    ['Water', r=>r.t&&r.t.water ? goalState(r.t.water, waterTarget(r.d,r.T), 'more') : null],
+    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps ? goalState(r.d.health.steps, goal, 'more') : null],
+    ['Sleep 7 h+', r=>r.d&&r.d.health&&r.d.health.sleep_min ? goalState(r.d.health.sleep_min, 420, 'more') : null],
   ];
-  const hits = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)===true).length,0), tries = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)!==null).length,0);
+  const ok = x => x==='at' || x==='plus';
+  const hits = checks.reduce((s,[,f])=>s+rows.filter(r=>ok(f(r))).length,0), tries = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)!==null).length,0);
+  const mark = x => x===null ? '<span class="muted">·</span>' : `<span class="st st-${x}">${x==='under'?'↓':x==='over'?'↑':'✓'}</span>`;
   const targetsHtml = `<div class="tablewrap"><table class="hits"><thead><tr><th class="l"></th>${rows.map(r=>`<th>${esc(fmtDate(r.date,{weekday:'narrow'}))}</th>`).join('')}<th class="r">Hit</th></tr></thead><tbody>
-    ${checks.map(([l,f])=>{ const res=rows.map(f); return `<tr><td class="l">${l}</td>${res.map(x=>`<td>${x===null?'<span class="muted">·</span>':x?'<span class="ok">✓</span>':'<span class="no">✕</span>'}</td>`).join('')}<td class="r">${res.filter(x=>x===true).length}/${res.filter(x=>x!==null).length}</td></tr>`; }).join('')}
-    </tbody></table></div><div class="muted small">✓ reached · ✕ missed · dot = not logged. Calories count as on target within 10%.</div>`;
+    ${checks.map(([l,f])=>{ const res=rows.map(f); return `<tr><td class="l">${l}</td>${res.map(x=>`<td>${mark(x)}</td>`).join('')}<td class="r">${res.filter(ok).length}/${res.filter(x=>x!==null).length}</td></tr>`; }).join('')}
+    </tbody></table></div><div class="muted small"><span class="st-at">✓</span> on target (within 10%) · <span class="st-plus">✓</span> over, and that’s fine · <span class="st-under">↓</span> below · <span class="st-over">↑</span> over · dot = not logged.</div>`;
   const actDays = rows.slice().reverse().filter(r=>r.d&&((r.d.sports||[]).length||(r.d.exercises||[]).length));
   const activityHtml = actDays.length ? actDays.map(r=>`<h3>${esc(fmtDate(r.date,{weekday:'long',day:'numeric',month:'short'}))}</h3>${activityPanel(r.d)}`).join('') : '<div class="empty">No gym or sport logged in these 7 days.</div>';
   const actCount = actDays.reduce((s,r)=>s+(r.d.sports||[]).length+((r.d.exercises||[]).length?1:0),0);
@@ -1614,8 +1631,9 @@ function viewTrends(){
     return lineChart({pts:pts.map(x=>({date:x.date, v:x.trend, raw:x.kg, tip:`trend ${n1(x.trend)} kg`})), unit:'kg', color:'var(--water)'}) + '<div class="muted small">The line is your smoothed weight trend, which your targets use. Daily weigh-ins swing 1–2 kg with water and food.</div>'; })();
   return `<div class="grid">
     <div class="panel-head"><h2>Last 7 days</h2><span class="muted small">${esc(fmtDate(rows[0].date,{day:'numeric',month:'short'}))} – ${esc(fmtDate(rows[6].date,{day:'numeric',month:'short'}))}</span></div>
+    ${stateKey()}
     <div class="grid two">
-    ${metrics.map(([title,get,fmt,color,target,fmtAvg,sub])=>{ const w = weekBars(rows, get, fmt, color, target, title!=='Burned');
+    ${metrics.map(([title,get,fmt,kind,target,fmtAvg,sub])=>{ const w = weekBars(rows, get, fmt, kind, target);
       return `<section class="panel wk"><div class="panel-head"><h3>${title}</h3><span class="muted small">avg ${w.avg?fmtAvg(w.avg):'—'} · ${esc(sub)}</span></div>${w.html}</section>`; }).join('')}
     </div>
     <section class="panel folds">
