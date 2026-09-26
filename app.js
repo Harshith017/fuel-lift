@@ -1470,6 +1470,25 @@ function dashCell(label, v, target, value, kind, hasData=true){
     <div class="meter"><i style="width:${Math.min(100,pctV)}%;background:${st?stBar(st):'var(--ink-3)'}"></i></div><span class="val">${value}</span></div>`;
 }
 
+
+// Small tinted status tag, as in "On track" / "Low" / "Over".
+const ST_LABEL = {under:'Low', at:'On track', over:'Over', plus:'Above goal'};
+function statePill(st, label){ return st ? `<span class="spill" style="color:${stText(st)};background:color-mix(in srgb, ${stBar(st)} 15%, transparent)">${label||ST_LABEL[st]}</span>` : ''; }
+function rings(arcs){
+  // arcs: [{p:0-100+, color}] outermost first
+  const C = 84, sw = 11, gap = 4;
+  return `<svg class="rings" viewBox="0 0 ${C*2} ${C*2}" aria-hidden="true">${arcs.map((a,i)=>{ const r = C - sw/2 - i*(sw+gap), len = 2*Math.PI*r, f = Math.max(0, Math.min(1, a.p/100));
+    return `<circle cx="${C}" cy="${C}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="${sw}"/>
+      <circle cx="${C}" cy="${C}" r="${r}" fill="none" stroke="${a.color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${(len*f).toFixed(1)} ${len.toFixed(1)}" transform="rotate(-90 ${C} ${C})"/>`; }).join('')}</svg>`;
+}
+const ICONS = {
+  water:'<path d="M12 3.2c3.2 4.1 6 7.3 6 10.6a6 6 0 0 1-12 0c0-3.3 2.8-6.5 6-10.6z"/>',
+  steps:'<path d="M8.2 3.5c1.6 0 2.4 1.8 2.4 4s-.8 4-2.4 4-2.4-1.8-2.4-4 .8-4 2.4-4zM6 13.6h4.4v1.9a2.2 2.2 0 0 1-4.4 0zM15.8 7.3c1.6 0 2.4 1.8 2.4 4s-.8 4-2.4 4-2.4-1.8-2.4-4 .8-4 2.4-4zM13.6 17.4H18v1.9a2.2 2.2 0 0 1-4.4 0z"/>',
+  sleep:'<path d="M19.5 14.6A7.8 7.8 0 1 1 9.4 4.5a6.3 6.3 0 0 0 10.1 10.1z"/>',
+};
+const icon = (k, color) => `<span class="gicon" style="color:${color};background:color-mix(in srgb, ${color} 14%, transparent)"><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg></span>`;
+function greeting(){ const h=new Date().getHours(); return h<12?'Good morning':h<17?'Good afternoon':'Good evening'; }
+
 /* ---------- Today ---------- */
 function viewToday(){
   const day = getDay(S.date), t = dayTotals(day), T = dayTargets(day);
@@ -1483,16 +1502,31 @@ function viewToday(){
   return `${!S.profile ? `<div class="banner" style="margin-bottom:16px">Targets below use default numbers. <button class="linkbtn" data-action="goto" data-view="profile">Add your weight, height, age and goal</button> to set your own.</div>`:''}
   ${todayBanners()}
   <div class="grid">
-    <section class="panel dash" aria-label="Today at a glance">
-      <div class="dgrid">
-        ${dashCell('Calories', t.kcal, T.kcal, `${n0(t.kcal)} / ${n0(T.kcal)} kcal`, 'range', hasFood)}
-        ${dashCell('Protein', t.protein, T.protein, `${n0(t.protein)} / ${n0(T.protein)} g`, 'more', hasFood)}
-        ${dashCell('Carbs', t.carbs, T.carbs, `${n0(t.carbs)} / ${n0(T.carbs)} g`, 'range', hasFood)}
-        ${dashCell('Fibre', t.fiber, T.fiber, `${n0(t.fiber)} / ${n0(T.fiber)} g`, 'more', hasFood)}
-        ${dashCell('Sugar', t.sugar, T.sugar, `${n0(t.sugar)} / ≤${n0(T.sugar)} g`, 'limit', hasFood)}
-        <div class="dcell"><span class="l">Burned</span><span class="p" style="color:${stText('plus')}">${n0(B.total)}</span><span class="val">kcal${B.restEst||B.actEst?' (est.)':''}${t.burned?` · ${n0(t.burned)} training`:''}</span>
-          <span class="val" style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'surplus +':'deficit −'}${n0(Math.abs(bal))}`:''}</span></div>
-      </div>
+    ${(()=>{ const name = (prof().name||'').trim().split(/\s+/)[0]; const left = T.kcal - t.kcal;
+      const nudge = !hasFood ? (S.date===localDate() ? 'Log your first meal and the day fills in here.' : 'Nothing was logged on this day.')
+        : left>=0 ? `${n0(left)} kcal and ${n0(Math.max(0,T.protein-t.protein))} g protein left ${S.date===localDate()?'today':'that day'}.` : `${n0(-left)} kcal over ${S.date===localDate()?'today’s':'that day’s'} target.`;
+      return `<div class="hello">${S.date===localDate()?`<h1>${greeting()}${name?`, ${esc(name)}`:''}</h1>`:`<h1>${esc(fmtDate(S.date,{weekday:'long'}))}</h1>`}<p>${esc(nudge)}${S.date===localDate()&&t.water<WT*0.5&&new Date().getHours()>=14?' Drink some water too.':''}</p></div>`; })()}
+    <section class="panel nring" aria-label="Nutrition today">
+      ${(()=>{ const stK = hasFood ? goalState(t.kcal, T.kcal, 'range') : null;
+        const rows = [
+          ['Carbs', t.carbs, T.carbs, 'g', 'range', 'var(--carbs)'],
+          ['Protein', t.protein, T.protein, 'g', 'more', 'var(--protein)'],
+          ['Fat', t.fat, T.fat, 'g', 'range', 'var(--fat)'],
+          ['Fibre', t.fiber, T.fiber, 'g', 'more', 'var(--ink-3)'],
+          ['Sugar', t.sugar, T.sugar, 'g', 'limit', 'var(--ink-3)'],
+        ];
+        return `<div class="nring-top">
+          <div class="ringwrap">${rings([{p:P(t.carbs,T.carbs), color:'var(--carbs)'}, {p:P(t.protein,T.protein), color:'var(--protein)'}, {p:P(t.fat,T.fat), color:'var(--fat)'}])}
+            <div class="ringc"><b>${hasFood?Math.round(P(t.kcal,T.kcal)):0}%</b><span>of goal</span></div></div>
+          <div class="nsum"><span class="muted small">You have eaten</span><div class="nbig"><b style="color:${stK?stText(stK):'var(--accent-text)'}">${n0(t.kcal)}</b> kcal</div><span class="muted small">of ${n0(T.kcal)} kcal</span>${statePill(stK)}</div>
+        </div>
+        <div class="mrows">${rows.map(([l,v,tg,u,kind,c])=>{ const st = hasFood ? goalState(v,tg,kind) : null;
+          return `<div class="mrow"><span class="sw" style="background:${c}"></span><span class="ml">${l}</span><span class="mv">${n0(v)}<span class="muted"> / ${kind==='limit'?'≤':''}${n0(tg)} ${u}</span></span><span class="mp" style="color:${st?stText(st):'var(--ink-3)'}">${hasFood?Math.round(P(v,tg)):0}%</span>${statePill(st)||'<span></span>'}</div>`; }).join('')}</div>
+        <div class="stat3">
+          <div><b style="color:${stText('plus')}">${n0(B.total)}</b><span>kcal burned${B.restEst||B.actEst?' (est.)':''}</span></div>
+          <div><b>${n0(Math.max(0,T.kcal-t.kcal))}</b><span>kcal left</span></div>
+          <div><b style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'+':'−'}${n0(Math.abs(bal))}`:'—'}</b><span>${t.kcal?(bal>0?'surplus':'deficit'):'balance'}</span></div>
+        </div>`; })()}
     </section>
     ${loggerHtml('today')}
     <section class="panel folds" aria-label="What I ate and trained">
@@ -1507,17 +1541,17 @@ function viewToday(){
       ${fold('d-train', 'What I trained today', hasTraining?[...(day.exercises||[]).length?[`gym · ${(day.exercises||[]).length} exercise${(day.exercises||[]).length===1?'':'s'}`]:[], ...(day.sports||[]).map(a=>`${actTitle(a)}${a.minutes?` ${n0(a.minutes)} min`:''}`)].join(' · ')+(t.burned?` · ${n0(t.burned)} kcal`:''):'nothing yet',
         hasTraining ? activityPanel(day) : `<div class="empty">No training logged. Type it in the box above, like “bench 60kg 3x8, squat 80x5 x5 x5” or “badminton doubles 1 hr”.</div>`)}
     </section>
-    <section class="panel" aria-label="Water, steps and sleep">
-      <div class="dgrid three">
-        ${dashCell('Water', t.water, WT, `${n1(t.water/1000)} / ${n1(WT/1000)} L`, 'more', t.water>0)}
-        ${dashCell('Steps', H.steps||0, goal, `${H.steps?n0(H.steps):'0'} / ${n0(goal)}`, 'more', !!H.steps)}
-        ${(()=>{ const st = H.sleep_min ? goalState(H.sleep_min, 420, 'more') : null;
-          return `<div class="dcell"><span class="l">Sleep</span><span class="p"${st?` style="color:${stText(st)}"`:''}>${H.sleep_min?fmtSleep(H.sleep_min).replace(' ','<small> </small>'):'—'}</span>
-          <div class="meter"><i style="width:${Math.min(100,(H.sleep_min||0)/420*100)}%;background:${st?stBar(st):'var(--ink-3)'}"></i></div><span class="val">${sv?sv.label:'not logged'} · aim 7 h+</span></div>`; })()}
-      </div>
-      <div class="row">${[250,500,750].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml} ml</button>`).join('')}
-        ${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Undo</button>`:''}</div>
-      ${!H.steps&&!H.sleep_min?`<div class="muted small">Add steps and sleep by typing “slept 7h 10m, 9200 steps” in the log box, or a screenshot of your Health app.</div>`:''}
+    <section class="panel goals" aria-label="Today's goals">
+      <div class="panel-head"><h2>Today’s goals</h2></div>
+      ${(()=>{ const full = Math.floor(t.water/250), glasses = Math.min(12, Math.max(4, Math.ceil(WT/250), full));
+        const stW = t.water>0 ? goalState(t.water, WT, 'more') : null, stS = H.steps ? goalState(H.steps, goal, 'more') : null, stZ = H.sleep_min ? goalState(H.sleep_min, 420, 'more') : null;
+        const bar = (v, tg, st) => `<div class="meter"><i style="width:${Math.min(100,P(v,tg))}%;background:${st?stBar(st):'var(--ink-3)'}"></i></div>`;
+        return `<div class="grow">${icon('water','var(--water)')}<div class="gt"><b>Water</b><span class="muted small">${n1(t.water/1000)} of ${n1(WT/1000)} L · tap a glass to add 250 ml</span></div>${statePill(stW)}</div>
+          <div class="glasses2">${Array.from({length:glasses},(_,i)=>`<button class="gl${i<full?' on':''}" ${i<full?'disabled':'data-action="water" data-ml="250"'} aria-label="${i<full?'Glass drunk':'Add a 250 ml glass'}"><svg viewBox="0 0 24 28" aria-hidden="true"><path class="cup" d="M4 3h16l-2 21a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/><path class="fill" d="M5.4 10h13.2l-1.4 14a1.4 1.4 0 0 1-1.4 1.3H8.2a1.4 1.4 0 0 1-1.4-1.3z"/></svg></button>`).join('')}</div>
+          <div class="row">${[500,750].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml} ml</button>`).join('')}${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Undo</button>`:''}</div>
+          <div class="grow">${icon('steps','var(--accent)')}<div class="gt"><b>Steps</b><span class="muted small">${H.steps?n0(H.steps):'0'} of ${n0(goal)}</span></div>${statePill(stS)}</div>${bar(H.steps||0, goal, stS)}
+          <div class="grow">${icon('sleep','var(--fat)')}<div class="gt"><b>Sleep</b><span class="muted small">${H.sleep_min?`${fmtSleep(H.sleep_min)} · ${sv?sv.label.toLowerCase():''}`:'not logged'} · aim 7 h+</span></div>${statePill(stZ)}</div>${bar(H.sleep_min||0, 420, stZ)}
+          ${!H.steps&&!H.sleep_min?`<div class="muted small">Add steps and sleep by typing “slept 7h 10m, 9200 steps” in the log box, or a screenshot of your Health app.</div>`:''}`; })()}
     </section>
   </div>`;
 }
@@ -1634,7 +1668,12 @@ function viewTrends(){
     ${stateKey()}
     <div class="grid two">
     ${metrics.map(([title,get,fmt,kind,target,fmtAvg,sub])=>{ const w = weekBars(rows, get, fmt, kind, target);
-      return `<section class="panel wk"><div class="panel-head"><h3>${title}</h3><span class="muted small">avg ${w.avg?fmtAvg(w.avg):'—'} · ${esc(sub)}</span></div>${w.html}</section>`; }).join('')}
+      const pts = rows.map(r=>({r, v:get(r)})).filter(x=>x.v>0);
+      const score = x => kind==='range' ? -Math.abs(x.v-target) : x.v;
+      const best = pts.length>1 ? pts.reduce((a,b)=>score(b)>score(a)?b:a) : null, worst = pts.length>1 ? pts.reduce((a,b)=>score(b)<score(a)?b:a) : null;
+      const day = x => esc(fmtDate(x.r.date,{weekday:'long'}));
+      return `<section class="panel wk"><div class="panel-head"><h3>${title}</h3><span class="muted small">avg ${w.avg?fmtAvg(w.avg):'—'} · ${esc(sub)}</span></div>${w.html}
+        ${best&&worst&&best!==worst?`<div class="insight"><div><span class="idot" style="background:${stBar('at')}"></span><span><b>Best day</b><span class="muted small">${day(best)}</span></span><b class="num">${fmtAvg(best.v)}</b></div><div><span class="idot" style="background:${stBar('over')}"></span><span><b>${kind==='range'?'Furthest from target':'Lowest day'}</b><span class="muted small">${day(worst)}</span></span><b class="num">${fmtAvg(worst.v)}</b></div></div>`:''}</section>`; }).join('')}
     </div>
     <section class="panel folds">
       ${fold('t-micros', 'Vitamins &amp; minerals', low?`${low} low today`:'', microsHtml)}
@@ -1658,6 +1697,7 @@ function profileForm(){
   const p = prof(), T = targets();
   const opt = (obj,val) => Object.entries(obj).map(([k,v])=>`<option value="${k}" ${k===val?'selected':''}>${esc(v.label)}</option>`).join('');
   return `<form class="form profForm">
+        <label class="field full">Name<input id="pf_name" name="name" type="text" maxlength="40" autocomplete="given-name" placeholder="What should the app call you?" value="${esc(p.name||'')}"></label>
         <label class="field">Sex<select id="pf_sex" name="sex"><option value="male" ${p.sex==='male'?'selected':''}>Male</option><option value="female" ${p.sex==='female'?'selected':''}>Female</option></select></label>
         <label class="field">Date of birth<input id="pf_birth" name="birth" type="date" max="${localDate()}" value="${esc(p.birth||'')}"><span class="hint">${p.birth?`Age ${ageOf(p)}`:`Using age ${esc(p.age)} until you add it`}</span></label>
         <label class="field">Height (cm)<input id="pf_height" name="height_cm" type="number" min="120" max="230" step="0.5" value="${esc(p.height_cm)}"></label>
@@ -1945,7 +1985,7 @@ function onProfileSubmit(ev){
   const birth = v('#pf_birth'), bf = optNum(v('#pf_bf'),60);
   if (birth && !(Calc.ageOn(birth, localDate())>=13)) { toast('Check your date of birth.'); return; }
   if (bf!==null && bf<3) { toast('Body fat should be between 3 and 60%.'); return; }
-  const p = {...prof(), sex:v('#pf_sex'), birth, age:birth?Calc.ageOn(birth, localDate()):prof().age, height_cm:num(v('#pf_height'),250)||170, weight_kg:num(v('#pf_weight'),300)||70,
+  const p = {...prof(), name:($('#pf_name')?.value||'').trim().slice(0,40), sex:v('#pf_sex'), birth, age:birth?Calc.ageOn(birth, localDate()):prof().age, height_cm:num(v('#pf_height'),250)||170, weight_kg:num(v('#pf_weight'),300)||70,
     body_fat:bf, maint_source:v('#pf_maint'), eat_back:$('#pf_eatback').checked,
     activity:v('#pf_act'), goal:v('#pf_goal'), goal_rate:Number(v('#pf_rate'))||0.5,
     calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000};
