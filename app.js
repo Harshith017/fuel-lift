@@ -567,15 +567,39 @@ function parsePart(raw){
   const label = unit==='g'||unit==='ml' ? `${n0(grams)} ${unit}` : unit==='kg'||unit==='l' ? `${qty} ${unit}` : `${qty} ${unit || Object.keys(f.units||{})[0] || 'serving'}${qty>1&&!/s$/.test(unit||'')?'s':''}`;
   return {food:f, grams, label, mine:!!e.mine};
 }
-function localParse(text){
+/* Gym entries the built-in exercise table can read (exercises.js), with the
+   names this person already uses taking over the built-in ones. */
+function gymIndex(){
+  if (S._gidx && S._gidxRev===S.days) return S._gidx;
+  const known = new Map();
+  for (const [,d] of S.days) for (const e of d.exercises||[]) if (e.name && !known.has(exKey(e.name))) known.set(exKey(e.name), {name:e.name, group:e.muscle_group, met:e.met});
+  S._gidx = Gym.buildIndex([...known.values()]); S._gidxRev = S.days; return S._gidx;
+}
+function gymPart(text, prev){
+  if (typeof Gym==='undefined') return null;
+  try { return Gym.parsePart(text, {index:gymIndex(), prev}); } catch { return null; }
+}
+function localParse(text, date){
   const meal = /breakfast/i.test(text)?'breakfast':/lunch/i.test(text)?'lunch':/dinner/i.test(text)?'dinner':/snack/i.test(text)?'snack':guessMeal();
-  const parts = text.split(/\s*(?:,|;|\n|\+|&|\band\b|\bwith\b)\s*/i).map(x=>x.trim()).filter(Boolean);
-  const foods=[], rest=[]; let water=0;
-  for (const p of parts) { const r = parsePart(p); if (!r) { rest.push(p); continue; } if (r.skip) continue; if (r.water) { water += r.water; continue; }
-    const k = r.grams/100, per = r.food.per; const micros={}; for (const m of MICROS) micros[m.key] = (per.micros[m.key]||0)*k;
-    foods.push({id:uid(), name:r.food.name, quantity:r.label, grams:Math.round(r.grams), meal, time:nowTime(), kcal:per.kcal*k, protein:per.protein*k, carbs:per.carbs*k, fat:per.fat*k,
-      fiber:per.fiber*k, sugar:per.sugar*k, alcohol:(FOOD_ALCOHOL[r.food.name]||0)*k, micros, confidence:'high', source:r.mine?'my-food':'food-db'}); }
-  return {foods, water, rest};
+  const foods=[], rest=[], exercises=[]; let water=0, prev=null;
+  const gymHit = (p) => { const g = gymPart(p, prev); if (!g) return false;
+    if (g.continued) g.exercise.sets.push(...g.sets);
+    else { prev = {id:uid(), ...g.exercise, kcal_hint:null, time:nowTime()}; delete prev.kind; exercises.push(prev); prev.kind = g.exercise.kind; }
+    return true; };
+  // Commas and new lines separate entries; gym sets are read before "and"/"+" split them ("pull ups +10kg 3x8").
+  for (const chunk of text.split(/\s*(?:,|;|\n)\s*/).map(x=>x.trim()).filter(Boolean)) {
+    if (gymHit(chunk)) continue;
+    for (const p of chunk.split(/\s*(?:\+|&|\band\b|\bwith\b)\s*/i).map(x=>x.trim()).filter(Boolean)) {
+      const r = parsePart(p);
+      if (!r) { if (!gymHit(p)) { rest.push(p); prev = null; } continue; }
+      prev = null; if (r.skip) continue; if (r.water) { water += r.water; continue; }
+      const k = r.grams/100, per = r.food.per; const micros={}; for (const m of MICROS) micros[m.key] = (per.micros[m.key]||0)*k;
+      foods.push({id:uid(), name:r.food.name, quantity:r.label, grams:Math.round(r.grams), meal, time:nowTime(), kcal:per.kcal*k, protein:per.protein*k, carbs:per.carbs*k, fat:per.fat*k,
+        fiber:per.fiber*k, sugar:per.sugar*k, alcohol:(FOOD_ALCOHOL[r.food.name]||0)*k, micros, confidence:'high', source:r.mine?'my-food':'food-db'});
+    }
+  }
+  for (const e of exercises) { delete e.kind; e.source = 'exercise-db'; e.kcal = exerciseKcal(e, date); }
+  return {foods, water, rest, exercises};
 }
 function saveMyFood(f, extraAlias){
   if (!S.db || !(f.grams>0) || !f.name) return;
@@ -595,16 +619,18 @@ async function submitLog(){
   const ta = $('#logText'); const text = (ta?.value||'').trim();
   if (!text && !S.photo) { setStatus('Type what you ate, drank or lifted, or add a photo.', true); return; }
   const date = S.date; const p = prof();
-  const local = (text && !S.photo) ? localParse(text) : {foods:[], water:0, rest:text?[text]:[]};
+  const local = (text && !S.photo) ? localParse(text, date) : {foods:[], water:0, rest:text?[text]:[], exercises:[]};
+  const localGym = local.exercises.length ? Gym.recovery(local.exercises) : null;
   const restText = local.rest.join(', ');
   const needAI = !!S.photo || restText.length > 0;
   if (needAI && !S.sample) {
-    if (local.foods.length || local.water) { await saveEntry(date, {foods:local.foods, water_ml:local.water}); if ($('#logText')) $('#logText').value = restText; setStatus(`Logged what’s in the food table. AI isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
-    else setStatus('That isn’t in the food table, and AI isn’t set up for this app yet (see SETUP.md).', true);
+    if (local.foods.length || local.water || local.exercises.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym}); if ($('#logText')) $('#logText').value = restText; setStatus(`Logged what’s in the built-in tables. AI isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
+    else setStatus('That isn’t in the built-in food or exercise tables, and AI isn’t set up for this app yet (see SETUP.md).', true);
     return;
   }
   S.busy = true; S.ctl = new AbortController();
-  if (needAI) { setStatus(S.photo ? 'Looking at your photo…' : local.foods.length ? `Found ${local.foods.length} in your food table; reading the rest…` : 'Reading your entry…'); render(); }
+  const nLocal = local.foods.length + local.exercises.length;
+  if (needAI) { setStatus(S.photo ? 'Looking at your photo…' : nLocal ? `Found ${nLocal} in the built-in tables; reading the rest…` : 'Reading your entry…'); render(); }
   try {
     let r = {foods:[], supplements:[], activities:[], gym_recovery:null, exercises:[], water_ml:0, body_weight_kg:null, health:null, notes:''};
     if (needAI) {
@@ -617,6 +643,8 @@ async function submitLog(){
     }
     const aiFoods = r.foods.length;
     r.foods = [...local.foods, ...r.foods]; r.water_ml = (r.water_ml||0) + local.water;
+    r.exercises = [...local.exercises, ...r.exercises];
+    if (local.exercises.length) r.gym_recovery = Gym.recovery(r.exercises) || r.gym_recovery;
     if (!r.foods.length && !r.exercises.length && !r.water_ml && !r.body_weight_kg && !r.health && !r.supplements.length && !r.activities.length) {
       setStatus(r.notes || 'Nothing to log was found in that entry.', true);
     } else {
@@ -629,7 +657,7 @@ async function submitLog(){
       if (r.supplements.length) bits.push(r.supplements.map(x=>x.name).join(', '));
       if (r.health) bits.push('Health data'+(r.health.steps?` (${n0(r.health.steps)} steps`:' (')+(r.health.sleep_min?`${r.health.steps?', ':''}${fmtSleep(r.health.sleep_min)} sleep`:'')+')');
       for (const a of r.activities) enqueueActivity(a, date);
-      const how = !needAI ? ' From your food table, no AI used.' : local.foods.length ? ` ${local.foods.length} from your food table, the rest read by AI.` : aiFoods ? ' Saved to your food list, so next time it’s instant.' : '';
+      const how = !needAI ? ' From the built-in tables, no AI used.' : nLocal ? ` ${nLocal} from the built-in tables, the rest read by AI.` : aiFoods ? ' Saved to your food list, so next time it’s instant.' : r.exercises.length ? ' New exercises are remembered, so next time they’re instant.' : '';
       setStatus(bits.length ? 'Logged ' + bits.join(', ') + '.' + how + (r.notes ? ' ' + r.notes : '') : (r.notes||''));
       if ($('#logText')) $('#logText').value = ''; clearPhoto();
     }
@@ -637,8 +665,8 @@ async function submitLog(){
     if (e?.code === 'cancelled') setStatus('Stopped. Nothing was logged.');
     else {
       // Keep whatever the food table understood, even when Claude can't be reached.
-      if (local.foods.length || local.water) { await saveEntry(date, {foods:local.foods, water_ml:local.water}); if ($('#logText')) $('#logText').value = restText; }
-      setStatus((local.foods.length||local.water ? 'Logged the food-table items. ' : '') + (AI_ERR[e?.code] || AI_ERR.unavailable), true);
+      if (local.foods.length || local.water || local.exercises.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym}); if ($('#logText')) $('#logText').value = restText; }
+      setStatus((local.foods.length||local.water||local.exercises.length ? 'Logged what the built-in tables know. ' : '') + (AI_ERR[e?.code] || AI_ERR.unavailable), true);
     }
   } finally { S.busy=false; S.ctl=null; render(); }
   if (S.queue.length) runQueue();
@@ -1795,7 +1823,7 @@ function accountFold(){
 function foodListHtml(){
   const list=Object.entries(S.myFoods||{}).sort((a,b)=>(b[1].updated||0)-(a[1].updated||0));
   return `<div class="row"><button class="btn ghost sm" data-action="importIndb" ${S.libBusy?'disabled':''}>${(S.libFoods||[]).length?'Re-import INDB.xlsx':'Import 1,014 Indian recipes (INDB.xlsx)'}</button><span class="status${/isn|failed|Couldn|declined|Only|empty|Reconnect/.test(S.libStatus||'')?' err':''}">${esc(S.libStatus||'')}</span></div>
-    <div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs. These log instantly without AI.</div>
+    <div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs, and ${typeof Gym!=='undefined'?Gym.EXERCISES.length:0} gym exercises (plus any you’ve logged before). These log instantly without AI.</div>
     ${list.length?`<div>${list.slice(0,40).map(([k,f])=>`<div class="item"><div><div class="nm">${esc(f.name)}${f.verified?' <span class="tag">corrected</span>':''}</div><div class="sub">${n0(f.per.kcal)} kcal · P ${n1(f.per.protein)} · C ${n1(f.per.carbs)} · F ${n1(f.per.fat)} per 100 g</div></div><span></span><div class="acts"><button data-action="rmFood" data-key="${esc(k)}" aria-label="Remove ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`:''}`;
 }
 function viewProfile(){
