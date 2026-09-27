@@ -165,6 +165,16 @@ const targets = (date) => computeTargets(prof(), date);
 const suggestedTargets = () => computeTargets({...prof(), calorie_override:null, protein_override:null, carbs_override:null, fat_override:null, fiber_override:null, water_override_ml:null}, localDate());
 const emptyDay = date => ({date, foods:[], water:[], exercises:[], weight_kg:null});
 const getDay = date => S.days.get(date) || emptyDay(date);
+function mergeDays(){
+  const m = new Map(S.daysRaw || []);
+  for (const [date, h] of S.healthSync || []) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const add = {}; for (const k of ['steps','active_kcal','resting_kcal','sleep_min']) if (Number(h[k]) >= 0 && h[k] != null) add[k] = Number(h[k]);
+    const d = m.get(date) || emptyDay(date);
+    m.set(date, {...d, date, health:{...(d.health||{}), ...add}, health_synced_at:h.synced_at || null});
+  }
+  S.days = m;
+}
 
 /* ---------- storage ---------- */
 const queues = {};
@@ -1390,7 +1400,7 @@ function loggerHtml(kind){
 }
 function healthPanel(H){
   const p = prof(); const goal = Number(p.steps_goal)||10000;
-  if (!H.steps && !H.sleep_min && !H.active_kcal && !H.resting_kcal) return `<div class="empty">No Health data for this day yet. Paste your Shortcut line, add a screenshot of the Health app, or type something like “slept 6h 50m, 8400 steps”.</div>`;
+  if (!H.steps && !H.sleep_min && !H.active_kcal && !H.resting_kcal) return `<div class="empty">No Health data for this day yet. Type something like “slept 6h 50m, 8400 steps”, add a screenshot of the Health app, or <button class="linkbtn" data-action="goto" data-view="profile">set up automatic sync</button> (iPhone).</div>`;
   const v = H.sleep_min ? sleepVerdict(H.sleep_min, who(S.date).age) : null;
   return `<div class="hgrid">
     <div><div class="l">Sleep</div><div class="big" style="font-size:36px">${H.sleep_min?fmtSleep(H.sleep_min):'—'}</div>
@@ -1561,7 +1571,8 @@ function viewToday(){
           <div class="row">${[500,750].map(ml=>`<button class="btn ghost sm" data-action="water" data-ml="${ml}">+ ${ml} ml</button>`).join('')}${(day.water||[]).length?`<span class="spacer"></span><button class="linkbtn" data-action="undoWater">Undo</button>`:''}</div>
           <div class="grow">${icon('steps','var(--accent)')}<div class="gt"><b>Steps</b><span class="muted small">${H.steps?n0(H.steps):'0'} of ${n0(goal)}</span></div>${statePill(stS)}</div>${bar(H.steps||0, goal, stS)}
           <div class="grow">${icon('sleep','var(--fat)')}<div class="gt"><b>Sleep</b><span class="muted small">${H.sleep_min?`${fmtSleep(H.sleep_min)} · ${sv?sv.label.toLowerCase():''}`:'not logged'} · aim 7 h+</span></div>${statePill(stZ)}</div>${bar(H.sleep_min||0, 420, stZ)}
-          ${!H.steps&&!H.sleep_min?`<div class="muted small">Add steps and sleep by typing “slept 7h 10m, 9200 steps” in the log box, or a screenshot of your Health app.</div>`:''}`; })()}
+          ${day.health_synced_at?`<div class="muted small">Synced from Apple Health at ${esc(new Date(day.health_synced_at).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}))}.</div>`
+            : !H.steps&&!H.sleep_min?`<div class="muted small">Add steps and sleep by typing “slept 7h 10m, 9200 steps” in the log box${S.hsync?.connected?'':`, or <button class="linkbtn" data-action="goto" data-view="profile">sync them from Apple Health</button> automatically (iPhone)`}.</div>`:''}`; })()}
     </section>
   </div>`;
 }
@@ -1754,12 +1765,12 @@ function supplementsFold(){
 }
 function connectFold(){
   const p = prof();
-  return `<label class="check"><input type="checkbox" data-action="watchToggle" ${p.watch_workouts?'checked':''}> My watch records my gym and sport sessions (so they’re already in its active calories)</label>
+  return `${healthSyncHtml()}
+    <label class="check"><input type="checkbox" data-action="watchToggle" ${p.watch_workouts?'checked':''}> My watch records my gym and sport sessions (so they’re already in its active calories)</label>
     <ul class="tips">
-      <li><b>Apple Watch / Apple Health:</b> type your day into the log box, like “slept 7h 10m, 9200 steps, active 520 kcal”, or add a screenshot of the Health summary with Add photo. The AI reads it.</li>
-      <li><b>Garmin, Fitbit, Samsung and others:</b> the same works with a screenshot of the watch app’s daily summary. On iPhone you can also let Garmin Connect write to Apple Health.</li>
+      <li><b>Android, Fitbit, Samsung and others:</b> type your day into the log box, like “slept 7h 10m, 9200 steps, active 520 kcal”, or add a screenshot of the watch app’s daily summary with Add photo. The AI reads it.</li>
     </ul>
-    <div class="muted small">A web app can’t read Apple Health or Garmin directly, so there’s no automatic sync yet. Typing or a screenshot takes a few seconds a day.</div>`;
+    <div class="muted small">Apple and Garmin don’t let websites read your data directly, which is why the iPhone Shortcut does the sending.</div>`;
 }
 function dataFold(){
   return `<div class="row"><button class="btn sm" data-action="exportExcel" ${S.xlsBusy?'disabled':''}>${S.xlsBusy?'Preparing…':'Download all my data (Excel)'}</button></div>
@@ -2125,6 +2136,10 @@ document.addEventListener('click', ev => {
     case 'authOAuth': authOAuth(b.dataset.p); break;
     case 'faceIdSignIn': authFaceId(); break;
     case 'faceIdSetup': setupFaceId(); break;
+    case 'hsCreate': hsCreate(); break;
+    case 'hsRevoke': hsRevoke(); break;
+    case 'hsReload': S.hsync = undefined; render(); loadHealthSync(); break;
+    case 'hsCopy': b.dataset.what==='key' ? copyText(S.hsKey||'', 'Key') : copyText(hsUrl(), 'Address'); break;
     case 'faceIdRemove': removePasskey(b.dataset.id); break;
     case 'faceIdLater': try { localStorage.setItem('mt:faceid-later:'+S.user.id, '1'); } catch {} render(); break;
     case 'recheckMember': if (S.pendingUser) startFor(S.pendingUser); break;
@@ -2363,10 +2378,11 @@ async function webauthnLib(){
   await loadScript(LIBS.webauthn).catch(() => { throw {code:'offline'}; });
   return window.SimpleWebAuthnBrowser;
 }
-async function passkeyCall(action, body = {}){
+const passkeyCall = (action, body) => fnCall('passkey', action, body);
+async function fnCall(fn, action, body = {}){
   const cfg = FL_CONFIG; let token = cfg.SUPABASE_ANON_KEY;
   const { data:{ session } } = await SB.auth.getSession(); if (session) token = session.access_token;
-  let res; try { res = await fetch(cfg.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/passkey', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:cfg.SUPABASE_ANON_KEY, Authorization:'Bearer ' + token }, body:JSON.stringify({ action, ...body }) }); }
+  let res; try { res = await fetch(cfg.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/' + fn, { method:'POST', headers:{ 'Content-Type':'application/json', apikey:cfg.SUPABASE_ANON_KEY, Authorization:'Bearer ' + token }, body:JSON.stringify({ action, ...body }) }); }
   catch { throw { code:'offline' }; }
   let out = null; try { out = await res.json(); } catch {}
   if (!res.ok || !out || !out.ok) throw { code:(out && out.code) || 'unavailable' };
@@ -2391,6 +2407,56 @@ async function authFaceId(){
       n==='offline' ? 'You’re offline. Connect to the internet and try again.' : 'Couldn’t sign in. Try again, or use email.'};
   }
   render();
+}
+/* ---------- Automatic Apple Health sync (iPhone Shortcut → supabase/functions/health-sync) ---------- */
+const hsUrl = () => FL_CONFIG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/health-sync';
+async function loadHealthSync(){
+  try { S.hsync = await fnCall('health-sync', 'status'); } catch { S.hsync = S.hsync || null; }
+  render();
+}
+async function hsCreate(){
+  if (S.hsync?.connected && !confirm('Make a new sync key? The Shortcut will need the new key; the old one stops working.')) return;
+  S.hsBusy = true; render();
+  try { const r = await fnCall('health-sync', 'create-key'); S.hsKey = r.key; S.hsync = {connected:true, last_sync_at:null}; S.openFolds.add('hs-steps'); }
+  catch (e) { toast(e.code==='offline' ? 'You’re offline. Try again when connected.' : 'Couldn’t create a sync key. Try again.'); }
+  S.hsBusy = false; render();
+}
+async function hsRevoke(){
+  if (!confirm('Turn off automatic sync? The Shortcut stops working until you make a new key. Numbers already synced stay.')) return;
+  try { await fnCall('health-sync', 'revoke'); S.hsync = {connected:false}; S.hsKey = null; toast('Automatic sync is off.'); }
+  catch { toast('Couldn’t turn it off. Try again.'); }
+  render();
+}
+async function copyText(text, what){
+  try { await navigator.clipboard.writeText(text); toast(`${what} copied.`); }
+  catch { toast(`Couldn’t copy. Press and hold the ${what.toLowerCase()} to copy it.`); }
+}
+function healthSyncHtml(){
+  const H = S.hsync, key = S.hsKey;
+  const when = t => { if (!t) return 'not yet'; const d = new Date(t); return (localDate(d)===localDate() ? 'today' : fmtDate(localDate(d),{day:'numeric',month:'short'})) + ' at ' + d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); };
+  const state = H===undefined ? '<div class="muted small">Checking…</div>'
+    : H===null ? '<div class="muted small">Couldn’t check the sync status. <button class="linkbtn" data-action="hsReload">Try again</button></div>'
+    : key ? `<div class="hskey"><div class="small"><b>Your sync key</b>. Shown only now: copy it into the Shortcut (step 6). Keep it private; anyone with it can add steps and sleep to your log.</div>
+        <code class="keybox">${esc(key)}</code><div class="row"><button class="btn sm" data-action="hsCopy" data-what="key">Copy key</button><button class="btn sm ghost" data-action="hsCopy" data-what="address">Copy address</button></div>
+        <div class="muted small">Address: <code>${esc(hsUrl())}</code></div></div>`
+    : H.connected ? `<div class="row"><span class="pill good">On</span><span class="small">Last sync: ${esc(when(H.last_sync_at))}</span></div>
+        <div class="row"><button class="btn sm ghost" data-action="hsCopy" data-what="address">Copy address</button><button class="btn sm ghost" data-action="hsCreate" ${S.hsBusy?'disabled':''}>New key</button><button class="btn sm ghost" data-action="hsRevoke">Turn off</button></div>`
+    : `<button class="btn sm" data-action="hsCreate" ${S.hsBusy?'disabled':''}>${S.hsBusy?'Creating…':'Set up automatic sync'}</button>`;
+  const steps = `<ol class="tips hsteps">
+      <li><b>Garmin?</b> In Garmin Connect: More → Settings → Connected Apps → Apple Health, and allow steps, active calories and sleep. (Apple Watch: nothing to do.)</li>
+      <li>Open the <b>Shortcuts</b> app → <b>+</b> and name it “MaxxTempo sync”.</li>
+      <li>Add <b>Find Health Samples</b>: Type <i>Steps</i>, Start Date <i>is today</i>, Group By <i>Day</i>. Then add <b>Calculate Statistics</b>: <i>Sum</i>.</li>
+      <li>Add <b>Find Health Samples</b>: Type <i>Active Energy</i>, Start Date <i>is today</i>, Group By <i>Day</i>. Then <b>Calculate Statistics</b>: <i>Sum</i>.</li>
+      <li>Add <b>Find Health Samples</b>: Type <i>Sleep Analysis</i>, End Date <i>is today</i>, Value <i>is not In Bed</i>, Value <i>is not Awake</i>. Then <b>Get Details of Health Samples</b>: <i>Duration</i>, then <b>Calculate Statistics</b>: <i>Sum</i>.</li>
+      <li>Add <b>Get Contents of URL</b> with the address above. Tap the arrow: Method <i>POST</i>, Request Body <i>JSON</i>, and add four <i>Text</i> fields: <code>key</code> = your sync key, <code>steps</code> = the first Statistics, <code>active_kcal</code> = the second, <code>sleep</code> = the third.</li>
+      <li>Tap ▶ to test. It answers “MaxxTempo: saved … steps …”, and Today fills in.</li>
+      <li>Make it automatic: <b>Automation</b> tab → <b>+</b> → <i>Time of Day</i>, 11:45 pm, Daily → <i>Run Immediately</i> → pick “MaxxTempo sync”. Add another at 9 am to see last night’s sleep in the morning.</li>
+    </ol>
+    <div class="muted small">Steps look about double what the Health app shows? In step 3, add the filter Source <i>is</i> your Apple Watch. Synced numbers replace typed ones for that day.</div>`;
+  return `<div class="hsync"><div class="nm">Automatic sync from Apple Health <span class="tag">iPhone</span></div>
+    <div class="muted small">An iPhone Shortcut sends your steps, active calories and sleep every night, including Garmin data once Garmin Connect shares to Apple Health.</div>
+    ${state}
+    ${fold('hs-steps', 'Set up the Shortcut (5 minutes, once)', '', steps, 'inner')}</div>`;
 }
 async function loadPasskeys(){
   try { S.passkeys = (await passkeyCall('list')).passkeys; } catch { if (!S.passkeys) S.passkeys = null; }
@@ -2532,7 +2598,7 @@ async function startFor(user){
   S.pendingUser = null; S.isAdmin = !!m.is_admin;
   S.user = user; S.dbState='connecting'; render();
   if (S.isAdmin) loadMembers();
-  loadPasskeys(); loadBoard();
+  loadPasskeys(); loadBoard(); loadHealthSync();
   const db = FL.makeDb(SB, user.id, {
     onStatus: st => { if (S.sync!==st) { S.sync = st; render(); } },
     onError: code => { if (code==='too_large') toast('One change was too large to sync and was skipped.'); },
@@ -2550,7 +2616,13 @@ async function startFor(user){
   db.collection('reviews').orderBy('created','desc').limit(10).onSnapshot(snap => { S.reviews = snap.docs.map(d=>({...d.data()})); render(); });
   db.collection('days').orderBy('date','desc').limit(1000).onSnapshot(snap => {
     const m = new Map(); for (const d of snap.docs) m.set(d.id, d.data());
-    S.days = m; S.rev++; S.dbState='on'; render();
+    S.daysRaw = m; mergeDays(); S.rev++; S.dbState='on'; render();
+  });
+  // Numbers the Apple Health Shortcut sent (written only by the server, so
+  // syncing days never overwrites them); laid over each day's own health.
+  db.collection('health').onSnapshot(snap => {
+    const m = new Map(); for (const d of snap.docs) m.set(d.id, d.data());
+    S.healthSync = m; mergeDays(); S.rev++; render();
   });
   await db.start();
   S.dbReady = true; S.dbState='on'; render();
