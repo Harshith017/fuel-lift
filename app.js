@@ -259,29 +259,23 @@ function sportLine(a){
   return bits.join(' · ');
 }
 const sportTitle = a => titleCase(a.sport==='other'&&a.name?a.name:a.sport) + (a.session&&a.sport==='cricket'?` ${a.session}`:'');
-/* Total burned for a day. With Apple Health energy: its resting + active
-   (plus logged training if the Watch didn't record it). Without: the same
-   maintenance the targets use (measured from your logs when ready, which
-   already covers resting, daily movement and digestion), so far today,
-   plus the net calories of logged training. */
+/* Calories burned by moving: logged training and sports, plus walking.
+   Resting burn (breathing, digestion) is left out on purpose.
+   With Apple Health active energy, that already covers steps (and workouts
+   when the Watch recorded them); otherwise steps are estimated. */
+// Walking: stride ≈ 41.5% of height; net cost ≈ 0.5 kcal per kg per km above resting.
+const stepsKcal = (steps, w) => Math.round((Number(steps)||0) * (w.cm*0.415/100) / 1000 * 0.5 * w.kg);
 function burnedTotal(day){
   const p=prof(), H=day.health||{}, t=dayTotals(day), w=who(day.date);
-  const now = new Date(); const frac = day.date===localDate() ? Math.min(1,(now.getHours()*60+now.getMinutes())/1440) : 1;
-  if (H.resting_kcal || H.active_kcal) {
-    const resting = H.resting_kcal || Math.round(w.bmrKcal*frac), active = (H.active_kcal||0) + (p.watch_workouts ? 0 : t.burned);
-    return {total:Math.round(resting+active), resting, active, daily:null, restEst:!H.resting_kcal, actEst:!H.active_kcal, exercise:t.burned, hasHealth:true};
+  const training = Math.round(t.burned||0);
+  if (H.active_kcal) {
+    const moving = Math.round(H.active_kcal), trainingExtra = p.watch_workouts ? 0 : training;
+    return {total:moving+trainingExtra, training, moving, fromHealth:true};
   }
-  const T = computeTargets(p, day.date);
-  const daily = Math.round(T.maint*frac);
-  return {total:daily+Math.round(t.burned), resting:Math.round(w.bmrKcal*frac), daily, dailySource:T.maintSource, active:t.burned, restEst:true, actEst:true, exercise:t.burned, hasHealth:false};
+  const moving = stepsKcal(H.steps, w);
+  return {total:training+moving, training, moving, fromHealth:false};
 }
-// What "burned" is made of, in words. Without a watch it's mostly the body's
-// everyday burn, which happens on rest days too.
-function burnNote(B){
-  if (B.hasHealth) return `Burned: ${n0(B.resting)} resting + ${n0(B.active)} active${B.restEst||B.actEst?' (partly estimated)':''}, from Apple Health${B.exercise&&!prof().watch_workouts?' and your logged training':''}.`;
-  return `Burned: ${n0(B.daily)} everyday body burn (breathing, digestion, moving around; estimated${B.dailySource==='measured'?' from your logs':' from your profile'}${S.date===localDate()?', so far today':''}) + ${n0(B.exercise)} from training.`;
-}
-const burnTip = B => B.hasHealth ? `Resting ${n0(B.resting)} + active ${n0(B.active)} kcal` : `Everyday body burn ${n0(B.daily)} + training ${n0(B.exercise)} kcal`;
+const burnTip = B => B.fromHealth ? `Active energy from Apple Health ${n0(B.moving)}${prof().watch_workouts?'':` + logged training ${n0(B.training)}`} kcal` : `Training & sports ${n0(B.training)} + steps ${n0(B.moving)} kcal`;
 // Epley; sets above 12 reps are scored as 12 (estimates past that are unreliable).
 const e1rm = s => s.weight>0 ? Calc.e1rm(s.weight, Math.min(s.reps,12)) || 0 : 0;
 
@@ -1506,7 +1500,7 @@ function greeting(){ const h=new Date().getHours(); return h<12?'Good morning':h
 /* ---------- Today ---------- */
 function viewToday(){
   const day = getDay(S.date), t = dayTotals(day), T = dayTargets(day);
-  const H = day.health||{}; const B = burnedTotal(day); const bal = t.kcal - B.total;
+  const H = day.health||{}; const B = burnedTotal(day);
   const sv = H.sleep_min ? sleepVerdict(H.sleep_min, who(S.date).age) : null;
   const byMeal = MEALS.map(m => ({m, items:(day.foods||[]).filter(f=>f.meal===m)})).filter(g=>g.items.length);
   const WT = waterTarget(day, T), goal = Number(prof().steps_goal)||10000;
@@ -1540,10 +1534,9 @@ function viewToday(){
           return `<div class="mrow"><span class="sw" style="background:${c}"></span><span class="ml">${l}</span><span class="mv">${n0(v)}<span class="muted"> / ${kind==='limit'?'≤':''}${n0(tg)} ${u}</span></span><span class="mp" style="color:${st?stText(st):'var(--ink-3)'}">${hasFood?Math.round(P(v,tg)):0}%</span>${statePill(st)||'<span></span>'}</div>`; }).join('')}</div>
         <div class="stat3">
           <div data-tip="${esc(burnTip(B))}"><b style="color:${stText('plus')}">${emptyDay?'—':n0(B.total)}</b><span>kcal burned</span></div>
-          <div><b>${n0(Math.max(0,T.kcal-t.kcal))}</b><span>kcal left</span></div>
-          <div><b style="color:${!t.kcal?'':bal>0?'var(--warn)':'var(--good)'}">${t.kcal?`${bal>0?'+':'−'}${n0(Math.abs(bal))}`:'—'}</b><span>${t.kcal?(bal>0?'surplus':'deficit'):'balance'}</span></div>
-        </div>
-        ${emptyDay?'':`<p class="burnnote">${esc(burnNote(B))}</p>`}`; })()}
+          <div><b>${emptyDay?'—':n0(B.training)}</b><span>training</span></div>
+          <div><b>${emptyDay?'—':n0(B.moving)}</b><span>${B.fromHealth?'active (Health)':'steps'}</span></div>
+        </div>`; })()}
     </section>
     ${loggerHtml('today')}
     <section class="panel folds" aria-label="What I ate and trained">
@@ -1642,7 +1635,7 @@ function viewTrends(){
   const metrics = [
     ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'range', r=>r.T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
     ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'more', r=>r.T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
-    ['Burned', r=>r.d&&((r.d.foods||[]).length||(r.d.exercises||[]).length||(r.d.sports||[]).length||Object.keys(r.d.health||{}).length)?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'more', 0, v=>`${n0(v)} kcal`, 'everyday body burn + training'],
+    ['Burned', r=>r.d&&((r.d.foods||[]).length||(r.d.exercises||[]).length||(r.d.sports||[]).length||Object.keys(r.d.health||{}).length)?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'more', 0, v=>`${n0(v)} kcal`, 'training + sports + steps'],
     ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'more', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
     ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'more', goal, v=>n0(v), `goal ${n0(goal)}`],
     ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>fmtL(v*1000)+(s?'':' L'), 'more', r=>waterTarget(r.d||emptyDay(r.date), r.T)/1000, v=>`${fmtL(v*1000)} L`, `target ${fmtL(T.water_ml)} L+`],
