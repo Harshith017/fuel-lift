@@ -1197,7 +1197,7 @@ function recentFoods(){
   for (let i=0;i<30;i++){ const d=S.days.get(addDays(localDate(),-i)); if(!d) continue;
     (d.foods||[]).slice().reverse().forEach((f,j) => { const k=exKey(f.name)+'|'+exKey(f.quantity||f.grams); const e=seen.get(k);
       if (e) e.n++; else seen.set(k, {f, n:1, order:i*1000+j}); }); }
-  return [...seen.values()].sort((a,b)=>b.n-a.n || a.order-b.order).slice(0,10).map(x=>x.f);
+  return [...seen.values()].sort((a,b)=>b.n-a.n || a.order-b.order).slice(0,5).map(x=>x.f);
 }
 
 /* ---------- training load ---------- */
@@ -1411,7 +1411,7 @@ function planCard(compact){
     else {
       if (plan.warmup) body += `<div class="small"><b>Warm-up:</b> ${esc(plan.warmup)}</div>`;
       body += `<div class="tablewrap" tabindex="0"><table class="plantable"><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th><span class="sr">Edit</span></th></tr></thead><tbody>
-        ${plan.exercises.map((e,i)=>`<tr class="exrow1"><td class="l"><b>${esc(e.name)}</b>${e.edited?' <span class="tag">edited</span>':''}<div class="muted small">${[e.rest?`rest ${esc(e.rest)}`:'', e.note?esc(e.note):''].filter(Boolean).join(' · ')}</div></td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${esc(e.weight)}</td><td class="r"><button class="editbtn" data-action="planEx" data-i="${i}" aria-label="Edit ${esc(e.name)}">✎</button></td></tr><tr class="howrow"><td colspan="4">${howtoFold(e.name)}</td></tr>`).join('')}</tbody></table></div>
+        ${plan.exercises.map((e,i)=>`<tr class="exrow1"><td class="l"><b>${esc(e.name)}</b>${e.edited?' <span class="tag">edited</span>':''}</td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${planKg(e)>0 ? `${n1(planKg(e))} kg` : /body/i.test(e.weight||'') ? 'bodyweight' : esc(e.weight)}</td><td class="r"><button class="editbtn" data-action="planEx" data-i="${i}" aria-label="Edit ${esc(e.name)}">✎</button></td></tr><tr class="howrow"><td colspan="4">${howtoFold(e.name)}</td></tr>`).join('')}</tbody></table></div>
         <div class="row"><button class="btn ghost sm" data-action="planEx" data-i="-1">+ Add exercise</button><span class="muted small">Your edits become the starting point for future plans.</span></div>`;
       if (plan.finisher) body += `<div class="small"><b>Finish with:</b> ${esc(plan.finisher)}</div>`;
       if (plan.short) body += `<div class="small"><b>Short on time:</b> ${esc(plan.short)}</div>`;
