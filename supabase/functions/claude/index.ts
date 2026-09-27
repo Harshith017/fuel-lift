@@ -183,6 +183,8 @@ Deno.serve(async (req) => {
       await refund();
       const { status, reason } = (e ?? {}) as { status?: number; reason?: string };
       console.error("gemini", status, reason);
+      // Google says which limit: the free daily allowance for the whole app ("...PerDay...") or a per-minute one.
+      if (status === 429 && /per.?day|daily/i.test(reason ?? "")) return fail(429, "ai_day_limit", { usage });
       if (status === 429) return fail(429, "rate_limited", { usage });
       if (status && BUSY.has(status)) return fail(503, "busy", { usage, detail: String(reason ?? "").slice(0, 200) });
       if (status === 401 || status === 403 || status === 404 || /API_KEY/.test(reason ?? "")) return fail(500, "server_config");

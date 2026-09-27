@@ -436,14 +436,15 @@ function supplementsPanel(day){
 function guessMeal(){ const h=new Date().getHours(); return h<11?'breakfast':h<16?'lunch':h<19?'snack':'dinner'; }
 const AI_ERR = {
   session_expired:'You’ve been signed out. Sign in again, then log this entry.',
-  daily_cap:'You’ve used today’s AI allowance. The food table and saved foods still log instantly; AI is back tomorrow.',
+  daily_cap:'AI limit reached: you’ve used your 30 AI uses for today. Foods, gym sets, food search and barcodes still work without AI; AI is back tomorrow.',
+  ai_day_limit:'AI limit reached for today: the free AI allowance shared by everyone on this app is used up. It resets once a day (early afternoon India time). Foods, gym sets, food search and barcodes still work without AI.',
   not_invited:'AI features are invite-only on this app. Ask the owner to add your email.',
   not_approved:'Your account is waiting for the owner’s approval.',
   server_config:'The app’s AI key isn’t set up correctly. The owner needs to check the GEMINI_API_KEY or ANTHROPIC_API_KEY secret.',
   unavailable:'Couldn’t reach AI. Your entry is still here; try again.',
   busy:'The AI is busy right now (Google’s free service is overloaded). Your entry is still here; try again in a minute.',
   offline:'You’re offline. Food-table items still log; try AI again when you’re back online.',
-  rate_limited:'AI is busy right now. Try again in a minute.',
+  rate_limited:'Too many AI requests in the last minute. Try again in a minute.',
   image_rejected:'That file couldn’t be read. Try a JPEG, PNG or PDF under 20 MB.',
   refused:'AI couldn’t process that entry. Try describing it differently.',
   invalid_json:'Couldn’t turn that into a log entry. Try rephrasing, e.g. “150 g paneer, 2 rotis”.',
