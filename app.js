@@ -570,10 +570,10 @@ function parsePart(raw){
 /* Gym entries the built-in exercise table can read (exercises.js), with the
    names this person already uses taking over the built-in ones. */
 function gymIndex(){
-  if (S._gidx && S._gidxRev===S.days) return S._gidx;
+  if (S._gidx && S._gidxRev===S.days && S._gidxLib===Gym.libVersion()) return S._gidx;
   const known = new Map();
   for (const [,d] of S.days) for (const e of d.exercises||[]) if (e.name && !known.has(exKey(e.name))) known.set(exKey(e.name), {name:e.name, group:e.muscle_group, met:e.met});
-  S._gidx = Gym.buildIndex([...known.values()]); S._gidxRev = S.days; return S._gidx;
+  S._gidx = Gym.buildIndex([...known.values()]); S._gidxRev = S.days; S._gidxLib = Gym.libVersion(); return S._gidx;
 }
 function gymPart(text, prev){
   if (typeof Gym==='undefined') return null;
@@ -1417,6 +1417,7 @@ function loggerHtml(kind){
     <textarea id="logText" placeholder="${esc(ph)}" ${S.busy?'disabled':''}></textarea>
     <div class="row">
       ${S.canPhoto && kind!=='gym' ? `<button class="btn ghost sm" data-action="pickPhoto" ${S.busy?'disabled':''}>Add photo</button>` : ''}
+      ${kind!=='gym' ? `<button class="btn ghost sm" data-action="foodSearch" ${S.busy?'disabled':''}>Find food</button><button class="btn ghost sm" data-action="scan" ${S.busy?'disabled':''} aria-label="Scan a barcode">Scan</button>` : ''}
       ${S.photo ? `<span class="photo-pill"><img src="${S.photoUrl}" alt="Selected food photo">${esc(S.photo.name||'photo')}<button class="linkbtn" data-action="clearPhoto" aria-label="Remove photo">Remove</button></span>`:''}
       <span class="spacer"></span>
       ${S.busy ? `<button class="btn ghost sm" data-action="stop">Stop</button>` : ''}
@@ -1453,7 +1454,7 @@ function sportList(day){
 function exerciseList(day){
   const ex = day.exercises||[];
   if (!ex.length) return `<div class="empty">No training logged. Try “squat 80x5, 85x5, 90x3”.</div>`;
-  return ex.map(e=>`<div class="item"><div><div class="nm">${esc(e.name)} <span class="tag">${esc(e.muscle_group)}</span></div>
+  return ex.map(e=>`<div class="item"><div><div class="nm"><button class="linkbtn exname" data-action="howto" data-name="${esc(e.name)}" aria-label="How to do ${esc(e.name)}">${esc(e.name)}</button> <span class="tag">${esc(e.muscle_group)}</span></div>
     <div class="sub">${(e.sets||[]).length ? e.sets.map(s=>s.weight>0?`${n1(s.weight)} × ${s.reps}`:`${s.reps} reps`).join(' · ') : ''}${e.duration_min?`${(e.sets||[]).length?' · ':''}${n0(e.duration_min)} min`:''}</div></div>
     <div class="kc">${n0(e.kcal)}<span class="muted small"> kcal</span></div>
     <div class="acts"><button data-action="editEx" data-id="${e.id}" aria-label="Edit ${esc(e.name)}">Edit</button><button data-action="delEx" data-id="${e.id}" aria-label="Delete ${esc(e.name)}">✕</button></div></div>`).join('');
@@ -1655,7 +1656,196 @@ function viewGym(){
     ${sel ? exerciseDetail(sel) : ''}
     ${loadPanel()}
     ${planCard(false)}
+    <section class="panel folds" aria-label="Exercise library">${fold('g-lib', 'Exercise library', libCount() ? `${n0(libCount())} exercises with how-to` : 'loading…', libraryHtml())}</section>
   </div>`;
+}
+/* ---------- exercise library (exercises.js + data/ex-*.json) ---------- */
+const libCount = () => typeof Gym==='undefined' ? 0 : Gym.EXERCISES.length + Gym.libraries().reduce((s,l)=>s+l.items.length,0);
+function sourcesHtml(){
+  return `<ul class="tips">
+    <li><b>Foods:</b> MaxxTempo’s table (IFCT 2017 and USDA averages); Indian recipes from the <a href="https://www.anuvaad.org.in/indian-nutrient-databank/" target="_blank" rel="noopener">Indian Nutrient Databank (INDB)</a>, Vijayakumar et al. 2024, CC BY 4.0; <a href="https://fdc.nal.usda.gov" target="_blank" rel="noopener">USDA FoodData Central</a> SR Legacy, public domain.</li>
+    <li><b>Packaged foods:</b> barcode lookups from <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, © Open Food Facts contributors, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>. Scanning uses <a href="https://github.com/zxing-js/browser" target="_blank" rel="noopener">ZXing</a> (MIT / Apache-2.0).</li>
+    <li><b>Exercises:</b> <a href="https://github.com/yuhonas/free-exercise-db" target="_blank" rel="noopener">free-exercise-db</a> (public domain); <a href="https://wger.de" target="_blank" rel="noopener">wger</a> (CC-BY-SA, authors listed on each exercise); <a href="https://oss.exercisedb.dev" target="_blank" rel="noopener">ExerciseDB</a> free version (non-commercial, animations from ExerciseDB).</li>
+  </ul><div class="muted small">All free, with no accounts or keys. Food and exercise data is stored in the app, so it keeps working even if a source goes offline; only barcode lookups and exercise pictures need the internet.</div>`;
+}
+function libraryHtml(){
+  return `<label class="field full">Find an exercise<input id="exq" type="search" placeholder="e.g. incline db, lat pulldown, rdl" value="${esc(S.exq||'')}" autocomplete="off"></label>
+    <div id="exres" class="exres">${libResults(S.exq||'')}</div>
+    <div class="muted small">Tap one for how to do it. Anything listed here logs without AI when you type its name with your sets, e.g. “${esc('zercher squat 60x5')}”.</div>`;
+}
+function libResults(q){
+  if (!q.trim()) return '';
+  const r = Gym.search(q, 30);
+  if (!r.length) return `<div class="empty">No exercise matches “${esc(q)}”.</div>`;
+  return r.map(x=>`<button class="exrow" data-action="howto" data-name="${esc(x.name)}"><span>${esc(x.name)}</span><span class="tag">${esc(x.group)}</span></button>`).join('');
+}
+function openHowto(name){
+  const hs = Gym.howto(name); const d = $('#dlg');
+  const pic = hs.find(h=>h.item.img && /\.gif$/i.test(h.item.img)) || hs.find(h=>h.item.img);
+  const text = hs.find(h=>(h.item.i||[]).length);
+  const info = hs[0]?.item;
+  const credits = [...new Map(hs.map(h=>[h.source, h])).values()].map(h => h.source==='wger'
+    ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">wger.de</a> (${esc(h.item.lic||'CC-BY-SA')}, ${esc(h.item.by||'wger.de')})`
+    : h.source==='ExerciseDB' ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">ExerciseDB</a> (free version, non-commercial)`
+    : `<a href="${esc(h.url)}" target="_blank" rel="noopener">free-exercise-db</a> (public domain)`).join(' · ');
+  d.innerHTML = `<div class="howto"><h2>${esc(name)}</h2>
+    ${!hs.length ? `<p class="muted">${libCount() ? 'No instructions found for this exercise in the built-in libraries.' : 'The exercise library is still loading. Try again in a moment.'}</p>` : ''}
+    ${pic ? `<img class="howimg" src="${esc(pic.item.img)}" alt="${esc(pic.item.n)} demonstration" loading="lazy">` : ''}
+    ${info ? `<div class="small muted">${[info.g, (info.mu||[]).join(', '), (info.s||[]).length?`also ${info.s.join(', ')}`:'', info.eq].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+    ${text ? `<ol class="tips howsteps">${text.item.i.slice(0,10).map(x=>`<li>${esc(x)}</li>`).join('')}</ol>` : ''}
+    ${hs.length ? `<div class="muted small">From ${credits}.${text && text.item.n!==name ? ` Closest match: ${esc(text.item.n)}.` : ''}</div>` : ''}
+    <div class="row"><span class="spacer"></span><button class="btn" id="howClose">Close</button></div></div>`;
+  d.showModal(); $('#howClose').onclick = () => d.close();
+  const img = d.querySelector('.howimg'); if (img) img.addEventListener('error', () => img.remove());
+}
+/* Built-in databases in data/ (see DATA-LICENSES.md), fetched once after sign-in
+   and kept by the service worker. The app works without them. */
+const DATA_VER = 1;
+async function loadData(){
+  const get = f => fetch(`data/${f}.json?v=${DATA_VER}`).then(r => r.ok ? r.json() : null).catch(() => null);
+  const [free, wger, edb, indb] = await Promise.all([get('ex-free'), get('ex-wger'), get('ex-edb'), get('indb')]);
+  Gym.setLibraries([free, wger, edb]); S.libsReady = true;
+  if (indb && indb.items?.length) { S.libFoods = indb.items.map(r=>rowToFood(r,'indb')); S.indbBuiltIn = true; S.myFoodsVer=(S.myFoodsVer||0)+1; }
+  render();
+}
+// USDA is only needed for search, so it loads the first time someone searches.
+let usdaP = null;
+const loadUsda = () => usdaP ||= fetch(`data/usda.json?v=${DATA_VER}`).then(r => r.ok ? r.json() : null).then(d => (d?.items||[]).map(usdaToFood)).catch(() => (usdaP = null, []));
+function usdaToFood(r){
+  const [name, cat, units, kcal, protein, carbs, fat, fiber, sugar, ...m] = r;
+  const micros = {}; FOOD_MICRO_ORDER.forEach((k,i)=>micros[k]=m[i]||0);
+  return {name, aliases:[], units:units||{}, per:{kcal,protein,carbs,fat,fiber,sugar,micros}, alcohol:m[14]||0, cat, src:'usda'};
+}
+
+/* ---------- food search (my foods, built-in, INDB, USDA) and portions ---------- */
+async function searchFoods(q, limit=40){
+  const qw = normFood(q).split(' ').filter(Boolean).map(singular); if (!qw.length) return [];
+  const words = t => normFood(t).split(' ').map(singular);
+  const hit = (name, aliases) => [name, ...(aliases||[])].some(a => { const ws = words(a); return qw.every((w,i) => ws.some(x => i===qw.length-1 ? x.startsWith(w) : x===w)); });
+  const mine = Object.values(S.myFoods||{}).map(f => ({...f, src:'mine'}));
+  const out = [], seen = new Set();
+  const add = f => { const k = normFood(f.name); if (seen.has(k) || out.length >= limit*3) return; seen.add(k); out.push(f); };
+  for (const f of mine) if (hit(f.name, f.aliases)) add(f);
+  for (const f of FOODS) if (hit(f.name, f.aliases)) add({...f, src:'builtin'});
+  for (const f of S.libFoods||[]) if (hit(f.name, f.aliases)) add(f);
+  for (const f of await loadUsda()) if (hit(f.name)) add(f);
+  const rank = {mine:0, builtin:1, indb:2, usda:3};
+  return out.sort((a,b) => rank[a.src]-rank[b.src] || a.name.length-b.name.length).slice(0, limit);
+}
+const SRC_LABEL = {mine:'my food', builtin:'built in', indb:'INDB', usda:'USDA', off:'Open Food Facts'};
+function openFoodSearch(){
+  const d = $('#dlg');
+  d.innerHTML = `<div class="fsearch"><h2>Find a food</h2>
+    <label class="field full">Search<input id="fq" type="search" placeholder="e.g. almonds, paneer tikka, oats" autocomplete="off"></label>
+    <div id="fres" class="exres"><div class="muted small">${n0(FOODS.length + (S.libFoods||[]).length)} Indian and everyday foods, plus about 7,200 from USDA. No AI used.</div></div>
+    <div class="row"><button class="btn ghost sm" id="fscan">Scan a barcode</button><span class="spacer"></span><button class="btn ghost" id="fclose">Close</button></div></div>`;
+  d.showModal(); $('#fclose').onclick = () => d.close(); $('#fscan').onclick = () => openScanner();
+  let t = null, list = [];
+  $('#fq').addEventListener('input', ev => { clearTimeout(t); t = setTimeout(async () => {
+    const q = ev.target.value; if (!q.trim()) { $('#fres').innerHTML=''; return; }
+    list = await searchFoods(q);
+    if ($('#fq')?.value !== q) return;
+    $('#fres').innerHTML = list.length ? list.map((f,i)=>`<button class="exrow" data-i="${i}"><span>${esc(f.name)}<span class="muted small"> · ${n0(f.per.kcal)} kcal/100 g</span></span><span class="tag">${SRC_LABEL[f.src]||''}</span></button>`).join('')
+      : `<div class="empty">Nothing found for “${esc(q)}”. Type it in the log box instead and AI will read it.</div>`;
+  }, 180); });
+  $('#fres').addEventListener('click', ev => { const b = ev.target.closest('[data-i]'); if (b) openPortion(list[+b.dataset.i]); });
+  setTimeout(() => $('#fq')?.focus(), 50);
+}
+function foodFromPer(f, grams, label){
+  const k = grams/100, per = f.per; const micros = {}; for (const m of MICROS) micros[m.key] = (per.micros[m.key]||0)*k;
+  return {id:uid(), name:f.name, quantity:label, grams:Math.round(grams), meal:guessMeal(), time:nowTime(), kcal:per.kcal*k, protein:per.protein*k, carbs:per.carbs*k, fat:per.fat*k,
+    fiber:(per.fiber||0)*k, sugar:(per.sugar||0)*k, alcohol:((f.alcohol ?? FOOD_ALCOHOL[f.name]) || 0)*k, micros, confidence:'high', source:'food-'+(f.src||'db')};
+}
+function openPortion(f, note){
+  if (!f) return;
+  const d = $('#dlg'); const units = Object.entries(f.units||{}).filter(([,g])=>g>0);
+  // Start from one serving; a whole packet only when it's a small one (a bar, a sachet), otherwise 100 g.
+  const U = f.units||{}; const def = U.serving ? 'serving' : U.packet && U.packet<=60 ? 'packet' : units.length && !U.packet ? units[0][0] : 'g';
+  const opts = [...units.map(([u,g])=>`<option value="${esc(u)}" ${u===def?'selected':''}>${esc(u)} (${n0(g)} g)</option>`), `<option value="g" ${def==='g'?'selected':''}>grams</option>`].join('');
+  d.innerHTML = `<form class="form" id="pform" style="gap:12px"><h2 class="full">${esc(f.name)}</h2>
+    ${note ? `<div class="full small muted">${note}</div>` : ''}
+    <label class="field">Amount<input id="pq" type="number" min="0" step="any" inputmode="decimal" value="${def==='g'?100:1}"></label>
+    <label class="field">Unit<select id="pu">${opts}</select></label>
+    <label class="field">Meal<select id="pm">${MEALS.map(m=>`<option ${m===guessMeal()?'selected':''}>${m}</option>`).join('')}</select></label>
+    <div class="full" id="pprev"></div>
+    <div class="full muted small">Per 100 g: ${n0(f.per.kcal)} kcal · P ${n1(f.per.protein)} · C ${n1(f.per.carbs)} · F ${n1(f.per.fat)} g · from ${esc(SRC_LABEL[f.src]||'food table')}</div>
+    <div class="full row"><span class="spacer"></span><button class="btn ghost" type="button" id="pcancel">Cancel</button><button class="btn" type="submit">Log it</button></div></form>`;
+  d.showModal();
+  const grams = () => { const q = num($('#pq').value, 100000), u = $('#pu').value; return u==='g' ? q : q*((f.units||{})[u]||100); };
+  const upd = () => { const g = grams(), k = g/100; $('#pprev').innerHTML = `<b>${n0(f.per.kcal*k)} kcal</b> · ${n0(g)} g · protein ${n1(f.per.protein*k)} g · carbs ${n1(f.per.carbs*k)} g · fat ${n1(f.per.fat*k)} g`; };
+  $('#pq').addEventListener('input', upd); $('#pu').addEventListener('change', () => { if ($('#pu').value==='g' && num($('#pq').value,1e5)<10) $('#pq').value = 100; upd(); }); upd();
+  $('#pcancel').onclick = () => d.close();
+  $('#pform').onsubmit = async ev => { ev.preventDefault();
+    const g = grams(); if (!(g>0) || g>5000) { $('#pprev').innerHTML = '<span class="err">Enter an amount up to 5 kg.</span>'; return; }
+    const q = num($('#pq').value,1e5), u = $('#pu').value;
+    const x = foodFromPer(f, g, u==='g' ? `${n0(g)} g` : `${q} ${u}${q>1&&!/s$/.test(u)?'s':''}`); x.meal = $('#pm').value;
+    d.close();
+    await saveEntry(S.date, {foods:[x]});
+    if (f.src==='usda' || f.src==='off') saveMyFood({...x, verified:f.src==='off'}, f.barcode || null);
+    setStatus(`Logged ${f.name} · ${n0(x.kcal)} kcal. No AI used${f.src==='usda'||f.src==='off'?'; saved to your food list, so typing it next time works too':''}.`);
+  };
+}
+
+/* ---------- barcode scanning (ZXing in the browser + Open Food Facts) ---------- */
+const ZXING = { src:'https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/umd/zxing-browser.min.js', integrity:'sha384-HRtzk9lZgkbSgvUyQrnfC/GxiXZgwaNyD7hC9wcXlsBpDhkS80ISl73juef2FRuf' };
+let scanCtl = null;
+function stopScan(){ try { scanCtl?.stop(); } catch {} scanCtl = null; }
+async function openScanner(){
+  const d = $('#dlg');
+  d.innerHTML = `<div class="scan"><h2>Scan a barcode</h2>
+    <div class="scanbox"><video id="scanv" playsinline muted></video><div class="scanline"></div></div>
+    <div class="small muted" id="scanmsg">Starting the camera…</div>
+    <form class="row" id="codeform"><input id="codein" inputmode="numeric" pattern="[0-9]*" placeholder="or type the barcode number" style="flex:1"><button class="btn ghost sm" type="submit">Look up</button></form>
+    <div class="muted small">Product data from <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, free and open (ODbL).</div>
+    <div class="row"><span class="spacer"></span><button class="btn ghost" id="scanclose">Close</button></div></div>`;
+  d.showModal();
+  const close = () => { stopScan(); d.close(); };
+  $('#scanclose').onclick = close; d.addEventListener('close', stopScan, {once:true});
+  $('#codeform').onsubmit = ev => { ev.preventDefault(); const c = ($('#codein').value||'').replace(/\D/g,''); if (c.length>=6) { stopScan(); lookupBarcode(c); } };
+  try {
+    await loadScript(ZXING);
+    const reader = new ZXingBrowser.BrowserMultiFormatReader();
+    scanCtl = await reader.decodeFromVideoDevice(undefined, $('#scanv'), (res) => {
+      if (!res || !scanCtl) return; const code = res.getText(); stopScan(); if (navigator.vibrate) navigator.vibrate(60); lookupBarcode(code);
+    });
+    if ($('#scanmsg')) $('#scanmsg').textContent = 'Point the camera at the barcode on the packet.';
+  } catch (e) {
+    console.warn('scanner', e?.name, e?.message);
+    if ($('#scanmsg')) $('#scanmsg').textContent = /NotAllowed|Permission/i.test(e?.name||e?.message||'') ? 'Camera permission is off. Allow the camera for this app, or type the number below.' : 'Couldn’t start the camera here. Type the barcode number below.';
+  }
+}
+async function lookupBarcode(code){
+  const d = $('#dlg'); if (!d.open) d.showModal();
+  // Scanned before? It's in your food list, no network needed.
+  const mine = Object.values(S.myFoods||{}).find(f => (f.aliases||[]).includes(code));
+  if (mine) { openPortion({...mine, src:'mine'}, `Barcode ${esc(code)} · from your food list`); return; }
+  d.innerHTML = `<div class="scan"><h2>Looking up ${esc(code)}…</h2><div class="muted small">Asking Open Food Facts.</div></div>`;
+  let p = null;
+  try {
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_en,brands,nutriments,serving_quantity,product_quantity,quantity`);
+    const j = await r.json().catch(() => null); if (j && j.status === 1) p = j.product;
+  } catch { d.innerHTML = `<div class="scan"><h2>Couldn’t look it up</h2><p class="muted">You seem to be offline. Try again when connected, or type what you ate in the log box.</p><div class="row"><span class="spacer"></span><button class="btn ghost" id="scanclose">Close</button></div></div>`; $('#scanclose').onclick = () => d.close(); return; }
+  const f = p && offToFood(p, code);
+  if (!f) {
+    d.innerHTML = `<div class="scan"><h2>${p ? esc(p.product_name||'Product')+': no nutrition facts yet' : 'Product not found'}</h2>
+      <p class="muted">Open Food Facts doesn’t have ${p?'the nutrition table for':''} barcode ${esc(code)} yet. Type what you ate in the log box instead, or add the product at <a href="https://world.openfoodfacts.org/cgi/product.pl?type=add&code=${esc(code)}" target="_blank" rel="noopener">Open Food Facts</a> so everyone gets it.</p>
+      <div class="row"><button class="btn ghost sm" id="scanagain">Scan another</button><span class="spacer"></span><button class="btn ghost" id="scanclose">Close</button></div></div>`;
+    $('#scanclose').onclick = () => d.close(); $('#scanagain').onclick = () => openScanner(); return;
+  }
+  openPortion(f, `Barcode ${esc(code)} · <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">Open Food Facts</a> (ODbL)`);
+}
+// Open Food Facts nutriments are per 100 g, minerals and vitamins in grams.
+function offToFood(p, code){
+  const n = p.nutriments||{}; const g = k => { const v = Number(n[k+'_100g']); return Number.isFinite(v) && v>=0 ? v : 0; };
+  const kcal = g('energy-kcal') || (g('energy') ? g('energy')/4.184 : 0); if (!(kcal>0)) return null;
+  const pn = String(p.product_name_en || p.product_name || '').trim(), brand = String(p.brands||'').split(',')[0].trim();
+  const name = (brand && !pn.toLowerCase().includes(brand.toLowerCase()) ? `${pn} · ${brand}` : pn || brand).slice(0,70) || `Product ${code}`;
+  const micros = { sat_fat_g:g('saturated-fat'), cholesterol_mg:g('cholesterol')*1000, sodium_mg:(g('sodium') || g('salt')/2.5)*1000, potassium_mg:g('potassium')*1000,
+    calcium_mg:g('calcium')*1000, iron_mg:g('iron')*1000, magnesium_mg:g('magnesium')*1000, zinc_mg:g('zinc')*1000, vitamin_a_mcg:g('vitamin-a')*1e6, vitamin_c_mg:g('vitamin-c')*1000,
+    vitamin_d_mcg:g('vitamin-d')*1e6, vitamin_b12_mcg:g('vitamin-b12')*1e6, folate_mcg:g('folates')*1e6, omega3_g:g('omega-3-fat') };
+  const units = {}; const sq = Number(p.serving_quantity); if (sq>0 && sq<2000) units.serving = Math.round(sq);
+  const pq = Number(p.product_quantity); if (pq>0 && pq<5000 && pq!==sq) units.packet = Math.round(pq);
+  return {name, aliases:[code], units, per:{kcal, protein:g('proteins'), carbs:g('carbohydrates'), fat:g('fat'), fiber:g('fiber'), sugar:g('sugars'), micros}, alcohol:g('alcohol')*0.789, src:'off', barcode:code};
 }
 
 /* ---------- Trends ---------- */
@@ -1822,8 +2012,8 @@ function accountFold(){
 }
 function foodListHtml(){
   const list=Object.entries(S.myFoods||{}).sort((a,b)=>(b[1].updated||0)-(a[1].updated||0));
-  return `<div class="row"><button class="btn ghost sm" data-action="importIndb" ${S.libBusy?'disabled':''}>${(S.libFoods||[]).length?'Re-import INDB.xlsx':'Import 1,014 Indian recipes (INDB.xlsx)'}</button><span class="status${/isn|failed|Couldn|declined|Only|empty|Reconnect/.test(S.libStatus||'')?' err':''}">${esc(S.libStatus||'')}</span></div>
-    <div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${(S.libFoods||[]).length} Indian recipes from INDB`:''}, plus ${list.length} learned from your logs, and ${typeof Gym!=='undefined'?Gym.EXERCISES.length:0} gym exercises (plus any you’ve logged before). These log instantly without AI.</div>
+  return `${S.indbBuiltIn ? '' : `<div class="row"><button class="btn ghost sm" data-action="importIndb" ${S.libBusy?'disabled':''}>${(S.libFoods||[]).length?'Re-import INDB.xlsx':'Import 1,014 Indian recipes (INDB.xlsx)'}</button><span class="status${/isn|failed|Couldn|declined|Only|empty|Reconnect/.test(S.libStatus||'')?' err':''}">${esc(S.libStatus||'')}</span></div>`}
+    <div class="muted small">${FOODS.length} foods built in${(S.libFoods||[]).length?`, ${n0((S.libFoods||[]).length)} Indian recipes from INDB`:''}, about 7,200 USDA foods to search, plus ${list.length} learned from your logs, and ${n0(libCount())} gym exercises. These log instantly without AI.</div>
     ${list.length?`<div>${list.slice(0,40).map(([k,f])=>`<div class="item"><div><div class="nm">${esc(f.name)}${f.verified?' <span class="tag">corrected</span>':''}</div><div class="sub">${n0(f.per.kcal)} kcal · P ${n1(f.per.protein)} · C ${n1(f.per.carbs)} · F ${n1(f.per.fat)} per 100 g</div></div><span></span><div class="acts"><button data-action="rmFood" data-key="${esc(k)}" aria-label="Remove ${esc(f.name)}">✕</button></div></div>`).join('')}</div>`:''}`;
 }
 function viewProfile(){
@@ -1858,6 +2048,7 @@ function viewProfile(){
       ${fold('s-profile', 'My details', `${esc(p.sex)} · ${n1(who(localDate()).kg)} kg · ${esc((GOALS[p.goal]||{}).label||'')}`, profileForm())}
       ${fold('s-data', 'Download my data', 'Excel', dataFold())}
       ${fold('s-connect', 'Watch &amp; health apps', p.watch_workouts?'watch on':'', connectFold())}
+      ${fold('s-sources', 'Data sources', 'free &amp; open', sourcesHtml())}
       ${S.isAdmin ? fold('s-people', 'People &amp; approvals', (()=>{ const n=(S.members||[]).filter(x=>x.status==='pending').length; return n?`${n} waiting`:`${(S.members||[]).filter(x=>x.status==='approved').length} approved`; })(), peopleFold()) : ''}
       ${fold('s-sports', 'Sports &amp; food list', `${Object.keys(p.sports||{}).length} sport${Object.keys(p.sports||{}).length===1?'':'s'}`, `<h3>Sports you play</h3>${sportsProfileHtml()}<h3>Your food list</h3>${foodListHtml()}`)}
     </section>
@@ -2165,6 +2356,9 @@ document.addEventListener('click', ev => {
     case 'authOAuth': authOAuth(b.dataset.p); break;
     case 'faceIdSignIn': authFaceId(); break;
     case 'faceIdSetup': setupFaceId(); break;
+    case 'howto': openHowto(b.dataset.name||''); break;
+    case 'foodSearch': openFoodSearch(); break;
+    case 'scan': openScanner(); break;
     case 'hsCreate': hsCreate(); break;
     case 'hsRevoke': hsRevoke(); break;
     case 'hsReload': S.hsync = undefined; render(); loadHealthSync(); break;
@@ -2196,6 +2390,7 @@ document.addEventListener('input', ev => bindInput(ev.target));
 document.addEventListener('change', ev => bindInput(ev.target));
 function bindInput(el){
   if (el.id==='planNote') { S.planNote = el.value; return; }
+  if (el.id==='exq') { S.exq = el.value; const r=$('#exres'); if (r) r.innerHTML = libResults(el.value); return; }
   const path = el.dataset && el.dataset.bind; if (!path) return;
   const v = el.type==='checkbox' ? el.checked : el.value;
   const [ns, ...rest] = path.split('.');
@@ -2627,7 +2822,7 @@ async function startFor(user){
   S.pendingUser = null; S.isAdmin = !!m.is_admin;
   S.user = user; S.dbState='connecting'; render();
   if (S.isAdmin) loadMembers();
-  loadPasskeys(); loadBoard(); loadHealthSync();
+  loadPasskeys(); loadBoard(); loadHealthSync(); loadData();
   const db = FL.makeDb(SB, user.id, {
     onStatus: st => { if (S.sync!==st) { S.sync = st; render(); } },
     onError: code => { if (code==='too_large') toast('One change was too large to sync and was skipped.'); },
@@ -2639,7 +2834,7 @@ async function startFor(user){
     if (!S.profile && !S.setupShown && !snap.metadata?.fromCache) { S.setupShown = true; startSetup('about'); return; }
     if (S.profile) S.setupShown = true; render(); });
   db.collection('reports').orderBy('report_date','desc').limit(50).onSnapshot(snap => { S.reports = snap.docs.map(d=>({...d.data()})); render(); });
-  db.collection('foodlib').onSnapshot(snap => { const rows=[]; for (const d of snap.docs) { try { rows.push(...JSON.parse(d.data().rows||'[]')); } catch {} } S.libFoods = rows.map(r=>rowToFood(r,'indb')); S.myFoodsVer=(S.myFoodsVer||0)+1; });
+  db.collection('foodlib').onSnapshot(snap => { if (S.indbBuiltIn) return; const rows=[]; for (const d of snap.docs) { try { rows.push(...JSON.parse(d.data().rows||'[]')); } catch {} } S.libFoods = rows.map(r=>rowToFood(r,'indb')); S.myFoodsVer=(S.myFoodsVer||0)+1; });
   db.collection('foods').limit(1000).onSnapshot(snap => { const m={}; for (const d of snap.docs) m[d.id]={...d.data()}; S.myFoods=m; S.myFoodsVer=(S.myFoodsVer||0)+1; });
   db.collection('plans').orderBy('date','desc').limit(14).onSnapshot(snap => { S.plans = snap.docs.map(d=>({...d.data()})); render(); });
   db.collection('reviews').orderBy('created','desc').limit(10).onSnapshot(snap => { S.reviews = snap.docs.map(d=>({...d.data()})); render(); });

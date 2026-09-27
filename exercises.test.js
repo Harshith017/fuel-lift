@@ -77,3 +77,27 @@ test("every built-in exercise is findable by its own name and aliases", function
     });
   });
 });
+
+test("open exercise libraries: logging by full name, how-to and search", function () {
+  var fs = require("node:fs");
+  var libs = ["ex-free", "ex-wger", "ex-edb"].map(function (f) { return JSON.parse(fs.readFileSync(__dirname + "/data/" + f + ".json", "utf8")); });
+  libs.forEach(function (l) { assert.ok(l.items.length > 500 && l.license && l.credit, l.source); });
+  G.setLibraries(libs);
+  var big = G.buildIndex([]);
+  assert.strictEqual(G.parsePart("zercher squat 60x5", { index: big, prev: null }).exercise.sets.length, 1);
+  assert.strictEqual(G.parsePart("bench 60x8", { index: big, prev: null }).exercise.name, "Barbell Bench Press", "built-in names still win");
+  var h = G.howto("Barbell Bench Press");
+  assert.ok(h.length >= 2 && h.every(function (x) { return !/decline|incline/i.test(x.item.n); }), h.map(function (x) { return x.item.n; }).join(", "));
+  assert.ok(G.search("lat pulldown").length > 3);
+  G.setLibraries([]);
+});
+
+test("built-in food data files are well formed", function () {
+  var fs = require("node:fs");
+  var indb = JSON.parse(fs.readFileSync(__dirname + "/data/indb.json", "utf8"));
+  var usda = JSON.parse(fs.readFileSync(__dirname + "/data/usda.json", "utf8"));
+  assert.ok(indb.items.length >= 1000 && usda.items.length >= 7000);
+  [indb, usda].forEach(function (d) { d.items.forEach(function (r) { assert.ok(r[0] && r[3] > 0 && r[3] < 950, d.source + ": " + r[0]); }); });
+  var almonds = usda.items.find(function (r) { return r[0] === "Nuts, almonds"; });
+  assert.ok(Math.abs(almonds[3] - 579) < 5 && Math.abs(almonds[4] - 21.2) < 1);
+});

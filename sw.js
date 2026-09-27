@@ -1,6 +1,6 @@
 /* MaxxTempo service worker: the app opens offline after the first visit.
    Bump VERSION when shipping changes. */
-const VERSION = 'fuel-lift-v25';
+const VERSION = 'fuel-lift-v26';
 const SHELL = ['./', 'index.html', 'boot.js', 'config.js', 'calc.js', 'foods.js', 'exercises.js', 'backend.js', 'app.js', 'manifest.json', 'icon-192.png', 'icon-180.png', 'icon-512.png'];
 const LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 
@@ -21,6 +21,11 @@ self.addEventListener('fetch', e => {
   e.respondWith(caches.open(VERSION).then(async cache => {
     // The app's own files: network first, so updates (and config.js) apply on
     // the next open; the cache is the offline fallback.
+    // Built-in databases are versioned (?v=), so they're served from the cache once fetched.
+    if (own && url.pathname.includes('/data/')) {
+      const hit = await cache.match(req); if (hit) return hit;
+      const res = await fetch(req); if (res.ok) cache.put(req, res.clone()); return res;
+    }
     if (own) {
       try { const res = await fetch(req); if (res.ok) cache.put(req, res.clone()); return res; }
       catch { return (await cache.match(req, { ignoreSearch: true })) || Response.error(); }

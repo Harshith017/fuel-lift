@@ -65,7 +65,7 @@ Open the link on your phone, then Share → **Add to Home Screen**.
 - **Automatic Apple Health sync (iPhone)**: nothing to set up on the server; `deploy.mjs` deploys the `health-sync` function. Each person taps *Set up automatic sync* in Profile → Settings → Watch & health apps, copies their private sync key into an iPhone Shortcut (the steps are in the app), and sets it to run nightly. It sends steps, active calories and sleep; Garmin data comes along once Garmin Connect shares to Apple Health. Only a hash of each key is stored, and a key can be replaced or turned off at any time.
 - **Face ID / Touch ID sign-in**: nothing to set up. Once approved, people turn it on in ⚙︎ Settings (or from the prompt on Today); the `passkey` function (deployed by `deploy.mjs`) checks each Face ID sign-in and re-checks approval. Passkeys are tied to the site's address, so they stop working if the app moves to a different domain.
 - **Invite-only Claude**: add friends' emails in the `invites` table (Table Editor). While the table is empty, anyone who signs up can use Claude up to the daily cap. Once it has rows, only those emails can.
-- **1,014 Indian recipes**: download `INDB.xlsx` from the INDB project, then Profile → *Import 1,014 Indian recipes*. They then log instantly without Claude.
+- **Built-in databases** (nothing to set up, all free): 1,014 Indian recipes (INDB), ~7,200 USDA foods to search (*Find food* on Today), barcode lookups from Open Food Facts (*Scan*), and ~3,300 exercises with how-to instructions and pictures (free-exercise-db, wger, ExerciseDB free version; *Exercise library* on Train). They live in `data/` and are rebuilt with `node tools/build-data.mjs`; sources and licences are in [DATA-LICENSES.md](DATA-LICENSES.md).
 
 ## Security
 
