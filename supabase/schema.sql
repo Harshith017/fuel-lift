@@ -175,3 +175,28 @@ create table if not exists public.webauthn_challenges (
   expires_at timestamptz not null default now() + interval '5 minutes'
 );
 alter table public.webauthn_challenges enable row level security;
+
+-- 7. Weekly leaderboard. Each person's app publishes its own weekly
+--    summary (no food or training details); approved members can read
+--    everyone's row. People who switch the leaderboard off delete theirs.
+create table if not exists public.leaderboard (
+  user_id        uuid not null references auth.users (id) on delete cascade,
+  week           date not null,                 -- Monday of the week
+  name           text,
+  workouts       int  not null default 0,        -- days with gym or sport
+  protein_avg    numeric,                       -- g/day over days with food logged
+  protein_target numeric,
+  logged_days    int  not null default 0,
+  score          int  not null default 0,        -- 0-100
+  updated_at     timestamptz not null default now(),
+  primary key (user_id, week)
+);
+alter table public.leaderboard enable row level security;
+drop policy if exists "members read the board" on public.leaderboard;
+drop policy if exists "write own board row"   on public.leaderboard;
+drop policy if exists "update own board row"  on public.leaderboard;
+drop policy if exists "delete own board row"  on public.leaderboard;
+create policy "members read the board" on public.leaderboard for select using (public.is_approved());
+create policy "write own board row"   on public.leaderboard for insert with check (auth.uid() = user_id and public.is_approved());
+create policy "update own board row"  on public.leaderboard for update using (auth.uid() = user_id and public.is_approved()) with check (auth.uid() = user_id and public.is_approved());
+create policy "delete own board row"  on public.leaderboard for delete using (auth.uid() = user_id);
