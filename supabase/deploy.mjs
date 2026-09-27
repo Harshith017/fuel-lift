@@ -53,13 +53,15 @@ await api('POST', `/projects/${ref}/database/query`, { query: await readFile(pat
 console.log('    done');
 
 // 3. Edge function
-step(3, 'Deploying the claude function');
-const fn = await readFile(path.join(HERE, 'functions/claude/index.ts'), 'utf8');
-const form = new FormData();
-form.append('metadata', JSON.stringify({ entrypoint_path: 'index.ts', name: 'claude', verify_jwt: true }));
-form.append('file', new Blob([fn], { type: 'application/typescript' }), 'index.ts');
-await api('POST', `/projects/${ref}/functions/deploy?slug=claude`, form);
-console.log('    deployed');
+step(3, 'Deploying the server functions');
+for (const name of ['claude', 'passkey']) {
+  const fn = await readFile(path.join(HERE, `functions/${name}/index.ts`), 'utf8');
+  const form = new FormData();
+  form.append('metadata', JSON.stringify({ entrypoint_path: 'index.ts', name, verify_jwt: true }));
+  form.append('file', new Blob([fn], { type: 'application/typescript' }), 'index.ts');
+  await api('POST', `/projects/${ref}/functions/deploy?slug=${name}`, form);
+  console.log(`    ${name} deployed`);
+}
 
 // 4. Secrets
 step(4, 'Storing the function secrets');

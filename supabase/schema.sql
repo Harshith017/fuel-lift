@@ -151,3 +151,27 @@ create policy "read own docs"   on public.docs for select using (auth.uid() = us
 create policy "insert own docs" on public.docs for insert with check (auth.uid() = user_id and public.is_approved());
 create policy "update own docs" on public.docs for update using (auth.uid() = user_id and public.is_approved()) with check (auth.uid() = user_id and public.is_approved());
 create policy "delete own docs" on public.docs for delete using (auth.uid() = user_id and public.is_approved());
+
+-- 6. Face ID / Touch ID sign-in (passkeys). Only the passkey server
+--    function reads or writes these tables (RLS on, no policies).
+create table if not exists public.passkeys (
+  id           text primary key,              -- credential id (base64url)
+  user_id      uuid not null references auth.users (id) on delete cascade,
+  public_key   text not null,                 -- base64url COSE public key
+  counter      bigint not null default 0,
+  transports   text[],
+  device_name  text,
+  created_at   timestamptz not null default now(),
+  last_used_at timestamptz
+);
+create index if not exists passkeys_user on public.passkeys (user_id);
+alter table public.passkeys enable row level security;
+
+create table if not exists public.webauthn_challenges (
+  id         uuid primary key default gen_random_uuid(),
+  challenge  text not null,
+  user_id    uuid references auth.users (id) on delete cascade,
+  kind       text not null check (kind in ('register','login')),
+  expires_at timestamptz not null default now() + interval '5 minutes'
+);
+alter table public.webauthn_challenges enable row level security;

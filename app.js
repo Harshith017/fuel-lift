@@ -856,6 +856,8 @@ function staleSports(){
 function todayBanners(){
   let h='';
   const waiting = S.isAdmin ? (S.members||[]).filter(x=>x.status==='pending').length : 0;
+  let later = false; try { later = !!localStorage.getItem('mt:faceid-later:'+(S.user?.id||'')); } catch {}
+  if (S.bioOK && S.passkeys && !S.passkeys.length && !later) h += `<div class="banner" style="margin-bottom:16px;border-left-color:var(--accent)"><b>Sign in with ${bioName()} next time.</b> No password needed after this. <button class="linkbtn" data-action="faceIdSetup" ${S.pkBusy?'disabled':''}>Turn it on</button><button class="linkbtn" data-action="faceIdLater" style="color:var(--ink-3)">Not now</button></div>`;
   if (waiting) h += `<div class="banner" style="margin-bottom:16px;border-left-color:var(--accent)">${waiting} ${waiting===1?'person is':'people are'} waiting for you to approve them. <button class="linkbtn" data-action="reviewPeople">Review</button></div>`;
   if (S.profile && !Object.keys(S.profile.sports||{}).length) h += `<div class="banner" style="margin-bottom:16px">Tell me which sports you play and how, so calories and recovery fit you. <button class="linkbtn" data-action="startSetup" data-step="sports">Set up my sports</button></div>`;
   for (const [k,v] of staleSports()) h += `<div class="banner" style="margin-bottom:16px">Your ${esc(v.name)} details are from ${esc(fmtDate(v.updated,{day:'numeric',month:'short',year:'numeric'}))}. Still how you play? <button class="linkbtn" data-action="updSport" data-key="${esc(k)}">Update</button><button class="linkbtn" data-action="stillRight" data-key="${esc(k)}">Still right</button></div>`;
@@ -2103,6 +2105,10 @@ document.addEventListener('click', ev => {
     case 'authSignUp': authSignUp(); break;
     case 'setPassword': setPassword(); break;
     case 'authOAuth': authOAuth(b.dataset.p); break;
+    case 'faceIdSignIn': authFaceId(); break;
+    case 'faceIdSetup': setupFaceId(); break;
+    case 'faceIdRemove': removePasskey(b.dataset.id); break;
+    case 'faceIdLater': try { localStorage.setItem('mt:faceid-later:'+S.user.id, '1'); } catch {} render(); break;
     case 'recheckMember': if (S.pendingUser) startFor(S.pendingUser); break;
     case 'memberSet': setMember(b.dataset.id, b.dataset.s); break;
     case 'reviewPeople': S.openFolds.add('s-people'); setView('profile'); loadMembers(); break;
@@ -2164,11 +2170,12 @@ function menuHtml(){
   return `<div class="menu-sec"><div class="menu-l">Appearance</div>
       <div class="seg" role="group" aria-label="Theme">${[['light','Light'],['dark','Dark'],['auto','Match phone']].map(([k,l])=>`<button data-action="theme" data-t="${k}" aria-pressed="${th===k}">${l}</button>`).join('')}</div></div>
     <div class="menu-sec"><div class="menu-l">Account</div><div id="menuAcct">${accountFold()}</div></div>
+    <div class="menu-sec"><div class="menu-l">${bioName()} sign-in</div><div id="menuPk">${passkeyMenu()}</div></div>
     <div class="menu-sec"><div class="menu-l">Password &amp; security</div>${securityFold()}</div>`;
 }
 function setMenu(open){
   const m=$('#menu'); m.hidden=!open; $('#menuBtn').setAttribute('aria-expanded', String(open));
-  if (open) { $('#menuBody').innerHTML = menuHtml(); if (!S.usage && S.sample) refreshUsage(); }
+  if (open) { $('#menuBody').innerHTML = menuHtml(); if (!S.usage && S.sample) refreshUsage(); loadPasskeys(); }
 }
 $('#menuBtn').onclick = () => setMenu($('#menu').hidden);
 $('#menuClose').onclick = () => setMenu(false);
@@ -2249,9 +2256,9 @@ function authView(){
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
   return `<section class="panel setup"><h2>Sign in</h2>
     <p class="muted">Your food, training and health logs are private to you and sync across your phone and laptop.</p>
-    ${FL_CONFIG.GOOGLE_SIGN_IN||FL_CONFIG.APPLE_SIGN_IN ? `<div class="authalt">
+    ${window.PublicKeyCredential||FL_CONFIG.GOOGLE_SIGN_IN ? `<div class="authalt">
+      ${window.PublicKeyCredential?`<button class="btn provider face" data-action="faceIdSignIn" ${a.busy?'disabled':''}><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 9.5v1M15 9.5v1M12 9.5v3.5h-1M9.5 15.5c1.4 1.2 3.6 1.2 5 0"/></svg><span>Sign in with ${bioName()}</span></button>`:''}
       ${FL_CONFIG.GOOGLE_SIGN_IN?`<button class="btn provider" data-action="authOAuth" data-p="google" ${a.busy?'disabled':''}><svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.5z"/></svg><span>Continue with Google</span></button>`:''}
-      ${FL_CONFIG.APPLE_SIGN_IN?`<button class="btn provider apple" data-action="authOAuth" data-p="apple" ${a.busy?'disabled':''}><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M16.4 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.9-3.5.9-.7 0-1.9-.8-3-.8-1.6 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.5 1.3-2.6-.1 0-2.5-.9-2.5-3.7zM14.1 5.6c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Continue with Apple</span></button>`:''}
     </div><div class="ordiv"><span>or use email</span></div>`:''}
     <label class="field">Email<input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(a.email)}"></label>
     <label class="field">Password<input id="authPass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></label>
@@ -2311,8 +2318,78 @@ async function setPassword(){
 async function authOAuth(provider){
   S.auth={...S.auth, busy:true, err:false, msg:''}; render();
   const { error } = await SB.auth.signInWithOAuth({ provider, options:{ redirectTo:redirectTo() } });
-  if (error) { S.auth={...S.auth, busy:false, err:true, msg:`Couldn’t open ${provider==='apple'?'Apple':'Google'} sign-in. Try again, or use email.`}; render(); }
+  if (error) { S.auth={...S.auth, busy:false, err:true, msg:'Couldn’t open Google sign-in. Try again, or use email.'}; render(); }
 }
+/* ---------- Face ID / Touch ID sign-in (passkeys, see supabase/functions/passkey) ---------- */
+const bioName = () => /iPhone|iPad/.test(navigator.userAgent) ? 'Face ID' : /Macintosh/.test(navigator.userAgent) ? 'Touch ID' : 'Face ID or fingerprint';
+const deviceName = () => { const u = navigator.userAgent; return /iPhone/.test(u)?'iPhone':/iPad/.test(u)?'iPad':/Android/.test(u)?'Android phone':/Macintosh/.test(u)?'Mac':/Windows/.test(u)?'Windows PC':'This device'; };
+async function webauthnLib(){
+  if (window.SimpleWebAuthnBrowser) return window.SimpleWebAuthnBrowser;
+  await new Promise((res, rej) => { const el = document.createElement('script'); el.src = 'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@14/dist/bundle/index.umd.min.js'; el.onload = res; el.onerror = () => rej({code:'offline'}); document.head.appendChild(el); });
+  return window.SimpleWebAuthnBrowser;
+}
+async function passkeyCall(action, body = {}){
+  const cfg = FL_CONFIG; let token = cfg.SUPABASE_ANON_KEY;
+  const { data:{ session } } = await SB.auth.getSession(); if (session) token = session.access_token;
+  let res; try { res = await fetch(cfg.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/passkey', { method:'POST', headers:{ 'Content-Type':'application/json', apikey:cfg.SUPABASE_ANON_KEY, Authorization:'Bearer ' + token }, body:JSON.stringify({ action, ...body }) }); }
+  catch { throw { code:'offline' }; }
+  let out = null; try { out = await res.json(); } catch {}
+  if (!res.ok || !out || !out.ok) throw { code:(out && out.code) || 'unavailable' };
+  return out;
+}
+async function authFaceId(){
+  S.auth = {...S.auth, busy:true, err:false, msg:''}; render();
+  try {
+    const lib = await webauthnLib();
+    const o = await passkeyCall('login-options');
+    const response = await lib.startAuthentication({ optionsJSON:o.options });
+    const v = await passkeyCall('login-verify', { challengeId:o.challengeId, response });
+    const { error } = await SB.auth.verifyOtp({ token_hash:v.token_hash, type:'magiclink' });
+    if (error) throw { code:'server_error' };
+    S.auth = {step:'email', email:'', msg:'', busy:false};
+  } catch (e) {
+    const n = e?.name || e?.code, b = bioName();
+    S.auth = {...S.auth, busy:false, err:true, msg:
+      n==='NotAllowedError' || n==='AbortError' ? `${b} was cancelled, or ${b} isn’t set up for MaxxTempo on this device yet. Sign in with email or Google, then turn it on in ⚙︎ Settings.` :
+      n==='unknown_passkey' ? `That ${b} sign-in was removed. Sign in with email or Google, then set it up again in ⚙︎ Settings.` :
+      n==='not_approved' ? 'Your account is waiting for the owner’s approval.' :
+      n==='offline' ? 'You’re offline. Connect to the internet and try again.' : 'Couldn’t sign in. Try again, or use email.'};
+  }
+  render();
+}
+async function loadPasskeys(){
+  try { S.passkeys = (await passkeyCall('list')).passkeys; } catch { if (!S.passkeys) S.passkeys = null; }
+  render(); if (!$('#menu').hidden) $('#menuBody').innerHTML = menuHtml();
+}
+async function setupFaceId(){
+  S.pkBusy = true; render(); if (!$('#menu').hidden) $('#menuBody').innerHTML = menuHtml();
+  const b = bioName();
+  try {
+    const lib = await webauthnLib();
+    const o = await passkeyCall('register-options');
+    const response = await lib.startRegistration({ optionsJSON:o.options });
+    await passkeyCall('register-verify', { challengeId:o.challengeId, response, device:deviceName() });
+    toast(`${b} is on. Next time, tap “Sign in with ${b}”.`);
+  } catch (e) {
+    const n = e?.name || e?.code;
+    if (n==='InvalidStateError' || n==='already_registered') toast(`${b} is already set up on this device.`);
+    else if (n!=='NotAllowedError' && n!=='AbortError') toast(n==='offline' ? 'You’re offline. Try again when you’re connected.' : `Couldn’t set up ${b}. Try again.`);
+  } finally { S.pkBusy = false; await loadPasskeys(); }
+}
+async function removePasskey(id){
+  const k = (S.passkeys||[]).find(x=>x.id===id); if (!k) return;
+  if (!confirm(`Remove ${bioName()} sign-in for ${k.device_name||'this device'}? You can set it up again any time.`)) return;
+  try { await passkeyCall('delete', { id }); toast('Removed.'); } catch { toast('Couldn’t remove it. Try again.'); }
+  loadPasskeys();
+}
+function passkeyMenu(){
+  if (!window.PublicKeyCredential) return '<div class="muted small">This browser can’t use Face ID or fingerprint sign-in.</div>';
+  const list = S.passkeys, b = bioName();
+  return `<div class="muted small">Sign in with ${b} instead of your password. Works on every device where your passkeys sync (iCloud Keychain or Google Password Manager).</div>
+    ${list && list.length ? list.map(k=>`<div class="item"><div><div class="nm">${esc(k.device_name||'Passkey')}</div><div class="sub">added ${esc(fmtDate(k.created_at.slice(0,10),{day:'numeric',month:'short'}))}${k.last_used_at?` · last used ${esc(fmtDate(k.last_used_at.slice(0,10),{day:'numeric',month:'short'}))}`:''}</div></div><span></span><div class="acts"><button data-action="faceIdRemove" data-id="${esc(k.id)}">Remove</button></div></div>`).join('') : ''}
+    <div class="row"><button class="btn sm" data-action="faceIdSetup" ${S.pkBusy?'disabled':''}>${S.pkBusy?'Waiting for '+b+'…':list&&list.length?`Add this device`:`Turn on ${b}`}</button></div>`;
+}
+
 /* ---------- approvals (owner only) ---------- */
 async function loadMembers(){
   if (!S.isAdmin || !SB) return;
@@ -2365,6 +2442,7 @@ async function startFor(user){
   S.pendingUser = null; S.isAdmin = !!m.is_admin;
   S.user = user; S.dbState='connecting'; render();
   if (S.isAdmin) loadMembers();
+  loadPasskeys();
   const db = FL.makeDb(SB, user.id, {
     onStatus: st => { if (S.sync!==st) { S.sync = st; render(); } },
     onError: code => { if (code==='too_large') toast('One change was too large to sync and was skipped.'); },
@@ -2392,6 +2470,7 @@ async function startFor(user){
 document.addEventListener('visibilitychange', () => { if (document.visibilityState!=='visible') return;
   if (S.isAdmin) loadMembers();
   if (S.pendingUser && S.memberInfo?.status!=='declined') startFor(S.pendingUser); });
+try { window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable?.().then(ok => { S.bioOK = !!ok; render(); }).catch(()=>{}); } catch {}
 render();
 (async () => {
   const cfg = window.FL_CONFIG || {};
@@ -2401,7 +2480,7 @@ render();
   if (session?.user) startFor(session.user); else render();
   SB.auth.onAuthStateChange((ev, sess) => {
     if (sess?.user) startFor(sess.user);
-    else if (ev==='SIGNED_OUT') { S.user=null; S.pendingUser=null; S.isAdmin=false; render(); }
+    else if (ev==='SIGNED_OUT') { S.user=null; S.pendingUser=null; S.isAdmin=false; S.passkeys=null; render(); }
   });
 })();
 })();
