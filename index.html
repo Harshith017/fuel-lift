@@ -258,6 +258,12 @@ details.micros>summary .muted{white-space:nowrap;margin-left:auto}
 .restbar button{min-height:40px;min-width:40px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;font-weight:600;font-size:13px;padding:0 8px}
 .resting .toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 .prbadge{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--grad);border-radius:6px;padding:2px 6px;vertical-align:2px}
+.wdays{display:flex;flex-wrap:wrap;gap:6px}
+.wd{position:relative} .wd input{position:absolute;opacity:0;inset:0;margin:0}
+.wd span{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:40px;padding:0 8px;border:1px solid var(--line);border-radius:10px;font-size:13px;font-weight:600;color:var(--ink-2)}
+.wd input:checked+span{background:var(--grad);color:var(--btn-ink);border-color:transparent}
+.wd input:focus-visible+span{outline:2px solid var(--focus);outline-offset:2px}
+.micgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px} .micgrid .field{font-size:12.5px}
 .exname{font:inherit;font-weight:inherit;color:inherit;text-align:left;text-decoration:underline dotted;text-underline-offset:3px;padding:0}
 .exres{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto}
 .exrow{display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
@@ -284,7 +290,7 @@ details.micros>summary .muted{white-space:nowrap;margin-left:auto}
 .plan-h{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .banner{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--surface);border-radius:8px;padding:10px 14px;font-size:14px}
 
-dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:18px;width:min(460px,calc(100vw - 32px))}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:18px;width:min(460px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto}
 dialog::backdrop{background:rgba(10,14,12,.45)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:10px;display:flex;gap:14px;align-items:center;font-size:14px;max-width:calc(100vw - 32px)}
 .toast button{background:none;border:0;color:var(--bg);font-weight:700;text-decoration:underline;cursor:pointer}
