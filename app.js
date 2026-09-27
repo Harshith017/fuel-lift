@@ -2611,12 +2611,22 @@ function authView(){
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
 }
 const redirectTo = () => location.origin + location.pathname;
+// Supabase's error, in plain words; the fallback when it's something else.
+function authErrMsg(error, fallback){
+  const m = `${error?.code||''} ${error?.message||''}`;
+  if (/already.?(registered|exists)/i.test(m)) return 'That email already has an account. Tap Sign in with your password, or use Face ID.';
+  if (/not.?authori[sz]ed|sending|smtp|confirmation email|magic link email/i.test(m)) return 'This app can’t send emails to new addresses yet. Create an account with a password instead, then ask the owner to approve you.';
+  if (/rate|too many/i.test(m)) return 'Too many attempts. Wait a few minutes and try again.';
+  if (/weak|pwned|password/i.test(m)) return error.message;
+  if (/invalid.*email|email.*invalid/i.test(m)) return 'That email address doesn’t look right. Check it and try again.';
+  return fallback + (error?.message ? ` (${error.message})` : '');
+}
 async function authSend(){
   const email = ($('#authEmail')?.value||'').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { S.auth={...S.auth, email, msg:'Enter your email address.', err:true}; render(); return; }
   S.auth={step:'email', email, busy:true, msg:''}; render();
   const { error } = await SB.auth.signInWithOtp({ email, options:{ emailRedirectTo:redirectTo() } });
-  S.auth = error ? {step:'email', email, busy:false, err:true, msg: /rate/i.test(error.message) ? 'Too many emails. Wait a minute and try again.' : 'Couldn’t send the email. Check the address and try again.'}
+  S.auth = error ? {step:'email', email, busy:false, err:true, msg: authErrMsg(error, 'Couldn’t send the email. Check the address and try again.')}
                  : {step:'code', email, busy:false, msg:''};
   render(); if (!error) setTimeout(()=>$('#authCode')?.focus(), 50);
 }
@@ -2662,7 +2672,7 @@ async function authSignUp(){
   S.auth={step:'email', email, busy:true, msg:''}; render();
   if (await pwnedPassword(password)) { S.auth={step:'email', email, busy:false, err:true, msg:PWNED_MSG}; render(); return; }
   const { data, error } = await SB.auth.signUp({ email, password, options:{ emailRedirectTo:redirectTo() } });
-  if (error) S.auth={step:'email', email, busy:false, err:true, msg: /rate/i.test(error.message) ? 'Too many emails. Wait a while and try again.' : /password/i.test(error.message) ? error.message : 'Couldn’t create the account. Check the address and try again.'};
+  if (error) S.auth={step:'email', email, busy:false, err:true, msg: authErrMsg(error, 'Couldn’t create the account. Check the address and try again.')};
   else if (data.user && !data.user.identities?.length) S.auth={step:'email', email, busy:false, err:true, msg:'That email already has an account. Sign in, or use the email link and then set a password under Profile → Account.'};
   else if (!data.session) S.auth={step:'confirm', email, busy:false, msg:''};
   render();
