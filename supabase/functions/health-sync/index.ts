@@ -67,7 +67,7 @@ function durationText(v: unknown): number | null {
 }
 // Sleep may arrive as minutes, hours or seconds; take the named field, else guess by size.
 function sleepMinutes(b: Record<string, unknown>): number | null {
-  for (const f of ["sleep", "sleep_min", "sleep_minutes", "sleep_hours", "sleep_seconds"]) { const d = durationText(b[f]); if (d != null) return d; }
+  for (const f of ["sleep", "sleep_min", "sleep_minutes", "sleep_hours", "sleep_seconds"]) { const v = b[f]; const d = durationText(Array.isArray(v) ? v.map(String).join("\n") : v); if (d != null) return d; }
   const s = num(b.sleep_seconds); if (s != null) return s / 60;
   const m = num(b.sleep_min ?? b.sleep_minutes); if (m != null) return m;
   const h = num(b.sleep_hours); if (h != null) return h * 60;
@@ -75,8 +75,15 @@ function sleepMinutes(b: Record<string, unknown>): number | null {
   return g <= 24 ? g * 60 : g <= 1440 ? g : g / 60;
 }
 // What arrived, without any values: content type, field names and their types.
+// Values appear only as their format, digits masked ("9999 count", "9 hr 99 min"),
+// and never the key.
+const fmt = (k: string, v: unknown) => {
+  if (k === "key") return "…";
+  const t = Array.isArray(v) ? `[${v.length}] ` + JSON.stringify(v[0] ?? null) : typeof v === "object" && v ? JSON.stringify(v) : String(v);
+  return JSON.stringify(t.replace(/\d/g, "9").replace(/[A-Za-z0-9_-]{24,}/g, "…").slice(0, 60));
+};
 const shape = (b: Record<string, unknown>, ct: string) =>
-  `${ct.split(";")[0] || "no content-type"} · ` + Object.entries(b).map(([k, v]) => `${k.slice(0, 20)}:${Array.isArray(v) ? "list" : typeof v}`).join(", ").slice(0, 300);
+  `${ct.split(";")[0] || "no content-type"} · ` + Object.entries(b).map(([k, v]) => `${k.slice(0, 20)}:${Array.isArray(v) ? "list" : typeof v}=${fmt(k, v)}`).join(", ").slice(0, 600);
 async function logAttempt(userId: string | null, status: number, code: string, detail: string) {
   try {
     await admin.from("health_attempts").insert({ user_id: userId, status, code, detail });
