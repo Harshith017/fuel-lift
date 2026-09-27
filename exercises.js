@@ -182,25 +182,37 @@ function buildIndex(known) {
 // Extra words that make it a different movement count more than ones that don't.
 const CHANGERS = new Set('incline decline reverse close wide narrow single one alternating alternate seated standing lying kneeling machine smith cable dumbbell barbell kettlebell band assisted jump jumping sumo front overhead behind floor hanging weighted'.split(' '));
 const NEUTRAL = new Set('medium grip normal regular standard exercise full range motion the with on a to'.split(' '));
+// Words that describe but don't change the exercise ("flat", "standard", "(mid-chest)").
+const IGNORE = new Set('flat standard regular classic basic traditional normal conventional strict full proper simple'.split(' '));
+let CUR_IDX = null;
+const curIndex = () => CUR_IDX || (CUR_IDX = EX.flatMap(e => [e.name, ...e.aliases].map(a => ({ k: norm(a), e }))).filter(x => x.k).sort((a, b) => b.k.length - a.k.length));
 function howto(name) {
-  const q = norm(name); if (!q) return [];
-  const cur = EX.find(e => norm(e.name) === q || e.aliases.some(a => norm(a) === q));
-  const queries = [...new Set([q, ...(cur ? [norm(cur.name), ...cur.aliases.map(norm)] : [])])].filter(x => x.split(' ').length >= 1);
+  const base = norm(String(name || '').replace(/\([^)]*\)/g, ' '));
+  const q = base.split(' ').filter(w => w && !IGNORE.has(w)).join(' '); if (!q) return [];
+  // Recognise it through the built-in names and shorthand first ("barbell flat bench press" → Barbell Bench Press).
+  let cur = EX.find(e => norm(e.name) === q || e.aliases.some(a => norm(a) === q));
+  if (!cur) { const hit = findExercise(q, curIndex()); if (hit && hit.rest.split(' ').every(w => !w || FILLER.has(w) || ['barbell', 'dumbbell', 'cable', 'machine'].includes(w))) cur = hit.e; }
+  const queries = [...new Set([q, ...(cur ? [norm(cur.name), ...cur.aliases.map(norm)] : [])])].filter(Boolean);
   const out = [];
   for (const l of LIBS) {
     let best = null;
     for (const it of l.items) {
-      const words = new Set(it.nk.split(' '));
+      const words = new Set(it.nk.split(' ').filter(w => !IGNORE.has(w)));
       for (const qq of queries) {
-        const qw = qq.split(' '); if (!qw.every(w => words.has(w))) continue;
-        const qs = new Set(qw); let score = qq === q ? 0 : 0.5;
+        const qw = qq.split(' ');
+        // At most one missing word, and never one that changes the movement.
+        const missing = qw.filter(w => !words.has(w));
+        if (missing.length > (qw.length >= 3 ? 1 : 0) || missing.some(w => CHANGERS.has(w))) continue;
+        const qs = new Set(qw); let score = (qq === q ? 0 : 0.5) + missing.length * 1.5;
         for (const w of words) if (!qs.has(w)) score += CHANGERS.has(w) ? 2 : NEUTRAL.has(w) ? 0.25 : 1;
         if (score <= 4 && (!best || score < best.score || (score === best.score && it.nk.length < best.it.nk.length))) best = { it, score };
       }
     }
     if (best) out.push({ source: l.source, credit: l.credit, url: l.url, item: best.it, score: best.score });
   }
-  return out.sort((a, b) => a.score - b.score);
+  // Only entries about as close as the best one, so a picture of a different exercise never shows.
+  out.sort((a, b) => a.score - b.score);
+  return out.filter(x => x.score <= out[0].score + 0.75);
 }
 
 // Search every exercise by words ("incline db" finds Incline Dumbbell Press…).
