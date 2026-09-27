@@ -291,6 +291,10 @@ const e1rm = s => s.weight>0 ? Calc.e1rm(s.weight, Math.min(s.reps,12)) || 0 : 0
 
 // sessions per exercise, oldest first
 function buildSessions(){
+  if (S._bs && S._bsDays===S.days && S._bsRev===S.rev) return S._bs;
+  const map = buildSessionsNow(); S._bs = map; S._bsDays = S.days; S._bsRev = S.rev; return map;
+}
+function buildSessionsNow(){
   const map = new Map();
   const dates = [...S.days.keys()].sort();
   for (const date of dates) {
@@ -1259,6 +1263,85 @@ function lastLifts(){
     .sort((a,b)=>b.last.date.localeCompare(a.last.date)).slice(0,30)
     .map(x=>`${x.e.name} (${x.e.group}) last ${x.last.date}: ${x.last.sets.map(s=>s.weight>0?`${s.weight}x${s.reps}`:`${s.reps}`).join(', ')}${x.last.bodyweight?'':`, best est. 1RM ${n1(Math.max(...x.e.sessions.map(s=>s.best)))} kg`}`).join('\n');
 }
+/* An exercise's "standard": what this person did last time (their top working
+   weight, its reps and how many sets), or what they last set in a plan, whichever
+   is newer. New plans start from it. */
+function exStandard(name){
+  const key = exKey(name);
+  const e = buildSessions().get(key); const last = e && e.sessions[e.sessions.length-1];
+  let fromLog = null;
+  if (last) {
+    const top = last.top, work = last.sets.filter(x => top>0 ? (x.weight||0) >= top*0.9 : true);
+    const counts = {}; for (const x of work) counts[x.reps] = (counts[x.reps]||0)+1;
+    const reps = +Object.entries(counts).sort((a,b)=>b[1]-a[1] || b[0]-a[0])[0][0];
+    fromLog = {sets:work.length, reps:String(reps), kg:top>0?top:0, date:last.date, from:'log', sets_text:last.sets.map(x=>x.weight>0?`${n1(x.weight)}×${x.reps}`:`${x.reps}`).join(', ')};
+  }
+  const saved = (prof().ex_std||{})[key];
+  if (saved && (!fromLog || saved.date >= fromLog.date)) return {...saved, from:'plan', sets_text:fromLog?.sets_text||''};
+  return fromLog;
+}
+function saveStandard(name, sets, reps, kg){
+  const p = prof(); const std = {...(p.ex_std||{})};
+  std[exKey(name)] = {sets:sets||null, reps:String(reps||''), kg:kg>0?kg:0, date:localDate()};
+  // Keep the 150 most recent.
+  const keep = Object.entries(std).sort((a,b)=>b[1].date.localeCompare(a[1].date)).slice(0,150);
+  saveProfile({...p, ex_std:Object.fromEntries(keep)});
+}
+const planKg = e => e.kg>0 ? e.kg : +((String(e.weight||'').match(/(\d+(?:\.\d+)?)\s*kg/i)||[])[1]||0);
+async function savePlan(plan){
+  plan.edited = Date.now();
+  S.plans = [plan, ...(S.plans||[]).filter(x=>x.id!==plan.id)].sort((a,b)=>b.date.localeCompare(a.date)); render();
+  if (S.db) await S.db.doc('plans/'+plan.id).set(plan);
+}
+function openPlanEx(i){
+  const plan = (S.plans||[]).find(p=>p.date>=localDate()); if (!plan) return;
+  const isNew = i < 0; const e = isNew ? {name:'', sets:3, reps:'10', weight:'', kg:0, rest:'90 s', note:''} : plan.exercises[i]; if (!e) return;
+  const d = $('#dlg');
+  const render1 = () => {
+    const st = e.name ? exStandard(e.name) : null;
+    return st ? `Last time: ${esc(st.sets_text || `${st.sets} × ${st.reps}${st.kg?` @ ${n1(st.kg)} kg`:''}`)}${st.from==='plan'?` · your standard ${st.sets||'?'} × ${esc(st.reps)}${st.kg?` @ ${n1(st.kg)} kg`:''}`:''}` : '';
+  };
+  d.innerHTML = `<form class="form" id="peForm" style="gap:12px"><h2 class="full">${isNew?'Add an exercise':'Edit exercise'}</h2>
+    <label class="field full">Exercise<input id="pe_name" value="${esc(e.name)}" autocomplete="off" placeholder="e.g. incline dumbbell press" required></label>
+    <div class="full exres" id="pe_sug" style="max-height:160px"></div>
+    <label class="field">Sets<input id="pe_sets" type="number" min="1" max="20" step="1" inputmode="numeric" value="${esc(e.sets||'')}"></label>
+    <label class="field">Reps<input id="pe_reps" value="${esc(e.reps||'')}" placeholder="8 or 8-10"></label>
+    <label class="field">Weight (kg)<input id="pe_kg" type="number" min="0" max="500" step="0.5" inputmode="decimal" value="${esc(planKg(e)||'')}" placeholder="0 = bodyweight"></label>
+    <label class="field">Rest<input id="pe_rest" value="${esc(e.rest||'')}" placeholder="90 s"></label>
+    <div class="full muted small" id="pe_last">${render1()}</div>
+    <label class="check full"><input type="checkbox" id="pe_std" checked> Make this my standard for ${e.name?esc(e.name):'this exercise'} in future plans</label>
+    <div class="full row">${isNew?'':'<button class="btn ghost sm" type="button" id="pe_del">Remove</button>'}<span class="spacer"></span><button class="btn ghost" type="button" id="pe_cancel">Cancel</button><button class="btn" type="submit">Save</button></div></form>`;
+  d.showModal();
+  const nameIn = $('#pe_name');
+  const fill = () => { const st = nameIn.value.trim() && exStandard(nameIn.value.trim()); $('#pe_last').innerHTML = (e.name=nameIn.value.trim(), render1());
+    if (st && isNew && !$('#pe_kg').value) { $('#pe_sets').value = st.sets||3; $('#pe_reps').value = st.reps||'10'; if (st.kg) $('#pe_kg').value = st.kg; } };
+  nameIn.addEventListener('input', () => { const q = nameIn.value; $('#pe_sug').innerHTML = q.trim().length<2 ? '' : Gym.search(q, 6).map(x=>`<button type="button" class="exrow" data-n="${esc(x.name)}"><span>${esc(x.name)}</span><span class="tag">${esc(x.group)}</span></button>`).join(''); });
+  nameIn.addEventListener('change', fill);
+  $('#pe_sug').addEventListener('click', ev => { const b = ev.target.closest('[data-n]'); if (!b) return; nameIn.value = b.dataset.n; $('#pe_sug').innerHTML=''; fill(); });
+  $('#pe_cancel').onclick = () => d.close();
+  if (!isNew) $('#pe_del').onclick = async () => { plan.exercises.splice(i,1); d.close(); await savePlan(plan); toast(`Removed ${e.name} from the plan`); };
+  $('#peForm').onsubmit = async ev => { ev.preventDefault();
+    const name = titleCase(nameIn.value).slice(0,60); if (!name) return;
+    const sets = Math.round(num($('#pe_sets').value,20))||null, reps = String($('#pe_reps').value||'').trim().slice(0,20), kg = Math.round(num($('#pe_kg').value,500)*100)/100;
+    const x = {...(isNew?{}:plan.exercises[i]), name, sets, reps, kg, weight: kg>0 ? `${n1(kg)} kg` : 'bodyweight', rest:String($('#pe_rest').value||'').slice(0,20), edited:true};
+    if (!isNew && x.name!==e.name) x.note = '';
+    if (isNew) plan.exercises.push(x); else plan.exercises[i] = x;
+    if ($('#pe_std').checked) saveStandard(name, sets, reps, kg);
+    d.close(); await savePlan(plan);
+  };
+}
+function stdLines(){
+  const names = new Set([...Object.keys(prof().ex_std||{}), ...[...buildSessions().keys()]]);
+  const out = []; for (const k of names) { const st = exStandard(k); if (!st) continue; const nm = buildSessions().get(k)?.name || titleCase(k);
+    if (st.date >= addDays(localDate(), -60)) out.push(`${nm}: ${st.sets||'?'} x ${st.reps}${st.kg?` @ ${n1(st.kg)} kg`:' bodyweight'} (${st.from==='plan'?'set by them':'last done'} ${st.date})`); }
+  return out.slice(0,40).join('\n');
+}
+// Keep the plan honest to the standard: a weight far from it (over 10% either way) goes back to it.
+function withStandard(e){
+  if (!e.name) return e; const st = exStandard(e.name); e.kg = planKg(e);
+  if (st && st.kg > 0 && (!(e.kg > 0) || Math.abs(e.kg - st.kg) / st.kg > 0.1)) { e.kg = st.kg; e.weight = `${n1(st.kg)} kg (your standard)`; e.sets = st.sets || e.sets; e.reps = st.reps || e.reps; }
+  return e;
+}
 function planTargetDate(){
   const today = localDate(), d = S.days.get(today);
   const trained = d && ((d.exercises||[]).length || (d.sports||[]).length);
@@ -1278,6 +1361,7 @@ ${trainingDigest(localDate(), 7)}
 Latest recovery estimate: ${rec?`${rec.label}, ${rec.recovering?`recovering until ${new Date(rec.t).toISOString().slice(0,16)}`:'recovered'}`:'none'}.
 Recent lifts (use these to set weights and progress them):
 ${lastLifts()||'No lifts logged yet.'}
+${stdLines()?`Their standards (what they did or set last time; start each of these exercises from it, and only add weight when every set of the standard was completed last time, by the smallest step: 2.5 kg, or 1 kg for dumbbells):\n${stdLines()}`:''}
 ${note?`What they told you about their plans: "${note}"`:''}
 Decide the best session for that day: which muscle groups are recovered (about 48 h for a trained muscle group, 72 h after a very hard or high-volume session), balance across the week (push, pull, legs, core), their sport load (after fast bowling or a match, protect the lower back, hamstrings and shoulders and avoid heavy legs the next day; before a match or nets keep legs fresh), sleep, and their split and goal. A rest or mobility day is a valid answer when it is the right call.
 Reply with ONLY this JSON:
@@ -1291,7 +1375,7 @@ type is one of gym, sport-skill, conditioning, mobility, rest. readiness is good
     const plan = {id:forDate, date:forDate, focus:String(res?.focus||'Session').slice(0,60), type:String(res?.type||'gym').slice(0,20),
       muscles:(Array.isArray(res?.muscles)?res.muscles:[]).slice(0,8).map(x=>String(x).toLowerCase().slice(0,20)), readiness:['good','moderate','low'].includes(res?.readiness)?res.readiness:'moderate',
       why:String(res?.why||'').slice(0,500), warmup:String(res?.warmup||'').slice(0,200),
-      exercises:(Array.isArray(res?.exercises)?res.exercises:[]).slice(0,10).map(e=>({name:String(e.name||'').slice(0,60), sets:Math.round(num(e.sets,20))||null, reps:String(e.reps??'').slice(0,20), weight:String(e.weight||'').slice(0,80), rest:String(e.rest||'').slice(0,20), note:String(e.note||'').slice(0,120)})).filter(e=>e.name),
+      exercises:(Array.isArray(res?.exercises)?res.exercises:[]).slice(0,10).map(e=>withStandard({name:String(e.name||'').slice(0,60), sets:Math.round(num(e.sets,20))||null, reps:String(e.reps??'').slice(0,20), weight:String(e.weight||'').slice(0,80), rest:String(e.rest||'').slice(0,20), note:String(e.note||'').slice(0,120)})).filter(e=>e.name),
       finisher:String(res?.finisher||'').slice(0,200), duration:num(res?.duration_min,300)||null, short:String(res?.if_short_on_time||'').slice(0,300),
       avoid:(Array.isArray(res?.avoid)?res.avoid:[]).slice(0,4).map(x=>String(x).slice(0,160)), next:String(res?.next||'').slice(0,200), note, created:Date.now()};
     if (S.db) await S.db.doc('plans/'+plan.id).set(plan);
@@ -1329,8 +1413,9 @@ function planCard(compact){
     if (compact) body += plan.exercises.length ? `<div class="small muted">${esc(plan.exercises.map(e=>e.name).join(' · '))}</div><button class="linkbtn" data-action="goto" data-view="gym" style="align-self:flex-start;padding-left:0">See the full session in Train</button>` : '';
     else {
       if (plan.warmup) body += `<div class="small"><b>Warm-up:</b> ${esc(plan.warmup)}</div>`;
-      if (plan.exercises.length) body += `<div class="tablewrap"><table><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th class="r">Rest</th></tr></thead><tbody>
-        ${plan.exercises.map(e=>`<tr><td class="l"><b>${esc(e.name)}</b>${e.note?`<div class="muted small">${esc(e.note)}</div>`:''}</td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${esc(e.weight)}</td><td class="r">${esc(e.rest)}</td></tr>`).join('')}</tbody></table></div>`;
+      body += `<div class="tablewrap"><table class="plantable"><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th><span class="sr">Edit</span></th></tr></thead><tbody>
+        ${plan.exercises.map((e,i)=>`<tr><td class="l"><button class="linkbtn exname" data-action="howto" data-name="${esc(e.name)}"><b>${esc(e.name)}</b></button>${e.edited?' <span class="tag">edited</span>':''}<div class="muted small">${[e.rest?`rest ${esc(e.rest)}`:'', e.note?esc(e.note):''].filter(Boolean).join(' · ')}</div></td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${esc(e.weight)}</td><td class="r"><button class="editbtn" data-action="planEx" data-i="${i}" aria-label="Edit ${esc(e.name)}">✎</button></td></tr>`).join('')}</tbody></table></div>
+        <div class="row"><button class="btn ghost sm" data-action="planEx" data-i="-1">+ Add exercise</button><span class="muted small">Your edits become the starting point for future plans.</span></div>`;
       if (plan.finisher) body += `<div class="small"><b>Finish with:</b> ${esc(plan.finisher)}</div>`;
       if (plan.short) body += `<div class="small"><b>Short on time:</b> ${esc(plan.short)}</div>`;
       if (plan.avoid.length) body += `<div><h3>Avoid today</h3><ul class="tips">${plan.avoid.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
@@ -2337,8 +2422,9 @@ document.addEventListener('click', ev => {
     case 'review': runReview(); break;
     case 'plan': runPlan(); break;
     case 'planFor': S.planFor=b.dataset.d; render(); break;
+    case 'planEx': openPlanEx(+b.dataset.i); break;
     case 'planToLog': { const pl=(S.plans||[]).find(x=>x.date>=localDate()); if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (!pl||!ta) break;
-      ta.value = pl.exercises.map(e=>{ const w=(String(e.weight).match(/(\d+(?:\.\d+)?)\s*kg/)||[])[1]; return `${e.name} ${e.sets||3}x${String(e.reps).replace(/[^\d-]/g,'').split('-').pop()||8}${w?' @'+w+'kg':''}`; }).join(', ');
+      ta.value = pl.exercises.map(e=>{ const w=planKg(e); return `${e.name} ${e.sets||3}x${String(e.reps).replace(/[^\d-]/g,'').split('-').pop()||8}${w?' @'+w+'kg':''}`; }).join(', ');
       ta.focus(); ta.scrollIntoView({block:'center'}); setStatus('Edit anything you did differently, then tap Log.'); break; }
     case 'ideas': runIdeas(); break;
     case 'useIdea': { const x=(S.ideas||[])[+b.dataset.i]; if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (x&&ta) { ta.value=`${x.name}: ${x.items}`; ta.focus(); ta.scrollIntoView({block:'center'}); } break; }
