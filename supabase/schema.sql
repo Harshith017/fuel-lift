@@ -213,7 +213,7 @@ create policy "delete own board row"  on public.leaderboard for delete using (au
 -- Only the kinds of records the app writes.
 alter table public.docs drop constraint if exists docs_collection_known;
 alter table public.docs add constraint docs_collection_known
-  check (collection in ('days','profile','foods','reports','plans','reviews','foodlib'));
+  check (collection in ('days','profile','foods','reports','plans','reviews','foodlib','health'));
 -- Leaderboard numbers must be sensible (weeks start on Monday).
 alter table public.leaderboard drop constraint if exists leaderboard_sane;
 alter table public.leaderboard add constraint leaderboard_sane check (
@@ -231,3 +231,16 @@ do $$ begin
     revoke all on function public.rls_auto_enable() from public, anon, authenticated;
   end if;
 end $$;
+
+-- 9. Apple Health sync keys (supabase/functions/health-sync).
+-- One key per person, stored only as a SHA-256 hash. Only the function reads
+-- or writes this table (RLS on, no policies); synced numbers go to docs
+-- collection 'health', one record per day.
+create table if not exists public.health_keys (
+  user_id      uuid primary key references auth.users (id) on delete cascade,
+  key_hash     text not null unique,
+  created_at   timestamptz not null default now(),
+  last_sync_at timestamptz
+);
+alter table public.health_keys enable row level security;
+revoke all on public.health_keys from anon, authenticated;
