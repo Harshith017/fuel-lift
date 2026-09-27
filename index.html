@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="MaxxTempo">
 <meta name="theme-color" content="#07060B">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://idmvlecpdgtiyjeikphi.supabase.co wss://idmvlecpdgtiyjeikphi.supabase.co https://api.pwnedpasswords.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://raw.githubusercontent.com https://wger.de https://static.exercisedb.dev https://images.openfoodfacts.org; connect-src 'self' https://idmvlecpdgtiyjeikphi.supabase.co wss://idmvlecpdgtiyjeikphi.supabase.co https://api.pwnedpasswords.com https://world.openfoodfacts.org https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <script src="boot.js"></script>
 <title>MaxxTempo</title>
@@ -234,6 +234,16 @@ details.micros>summary .muted{white-space:nowrap;margin-left:auto}
 .act .sub{font-size:12.5px;color:var(--ink-3)}
 .rec{display:flex;flex-direction:column;gap:6px;background:var(--surface-2);border-radius:8px;padding:10px}
 .tips{margin:0;padding-left:18px;font-size:13.5px;display:flex;flex-direction:column;gap:3px}
+.scan,.fsearch{display:flex;flex-direction:column;gap:10px} .scan h2,.fsearch h2{margin:0}
+.scanbox{position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3}
+.scanbox video{width:100%;height:100%;object-fit:cover;display:block}
+.scanline{position:absolute;left:10%;right:10%;top:50%;height:2px;background:var(--st-over);box-shadow:0 0 8px var(--st-over)}
+.exname{font:inherit;font-weight:inherit;color:inherit;text-align:left;text-decoration:underline dotted;text-underline-offset:3px;padding:0}
+.exres{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto}
+.exrow{display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
+.howto{display:flex;flex-direction:column;gap:10px} .howto h2{margin:0}
+.howimg{width:100%;max-height:260px;object-fit:contain;border-radius:10px;background:#fff}
+.howsteps{gap:6px}
 .hsync{display:flex;flex-direction:column;gap:10px;padding-bottom:14px;margin-bottom:12px;border-bottom:1px solid var(--line)}
 .hsync .fold.inner{border:1px solid var(--line);border-radius:12px;padding:0 12px}
 .hsteps{gap:7px;padding-left:20px} .hsteps code,.hskey code{font-size:12.5px;word-break:break-all}

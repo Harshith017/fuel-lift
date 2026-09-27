@@ -144,6 +144,15 @@ const norm = s => {
 };
 const normAlias = a => norm(a);
 
+/* Open exercise libraries (data/ex-*.json, loaded by the app): recognised by
+   their full names when logging, and used for "how to" and search. */
+let LIBS = [], LIB_VER = 0;
+function setLibraries(libs) {
+  LIBS = (libs || []).filter(l => l && Array.isArray(l.items)).map(l => ({ ...l, items: l.items.map(it => ({ ...it, nk: norm(it.n) })).filter(it => it.nk) }));
+  LIB_VER++;
+}
+const libVersion = () => LIB_VER;
+
 // Index: longest alias first, so "incline dumbbell press" wins over "dumbbell press".
 function buildIndex(known) {
   const idx = [];
@@ -158,8 +167,51 @@ function buildIndex(known) {
     if (old) for (const x of idx) if (x.e === old) x.e = e;
     idx.push({ k, e });
   }
+  // Library exercises by their full names, where the name isn't taken already.
+  const taken = new Set(idx.map(x => x.k));
+  for (const l of LIBS) for (const it of l.items) {
+    if (taken.has(it.nk)) continue; taken.add(it.nk);
+    idx.push({ k: it.nk, e: { name: it.n, group: it.g, kind: it.k, met: null, aliases: [], lib: l.source } });
+  }
   idx.sort((a, b) => b.k.length - a.k.length);
   return idx;
+}
+
+/* Instructions and pictures for an exercise: the closest entry in each library
+   (same words, fewest extra words), best first. */
+// Extra words that make it a different movement count more than ones that don't.
+const CHANGERS = new Set('incline decline reverse close wide narrow single one alternating alternate seated standing lying kneeling machine smith cable dumbbell barbell kettlebell band assisted jump jumping sumo front overhead behind floor hanging weighted'.split(' '));
+const NEUTRAL = new Set('medium grip normal regular standard exercise full range motion the with on a to'.split(' '));
+function howto(name) {
+  const q = norm(name); if (!q) return [];
+  const cur = EX.find(e => norm(e.name) === q || e.aliases.some(a => norm(a) === q));
+  const queries = [...new Set([q, ...(cur ? [norm(cur.name), ...cur.aliases.map(norm)] : [])])].filter(x => x.split(' ').length >= 1);
+  const out = [];
+  for (const l of LIBS) {
+    let best = null;
+    for (const it of l.items) {
+      const words = new Set(it.nk.split(' '));
+      for (const qq of queries) {
+        const qw = qq.split(' '); if (!qw.every(w => words.has(w))) continue;
+        const qs = new Set(qw); let score = qq === q ? 0 : 0.5;
+        for (const w of words) if (!qs.has(w)) score += CHANGERS.has(w) ? 2 : NEUTRAL.has(w) ? 0.25 : 1;
+        if (score <= 4 && (!best || score < best.score || (score === best.score && it.nk.length < best.it.nk.length))) best = { it, score };
+      }
+    }
+    if (best) out.push({ source: l.source, credit: l.credit, url: l.url, item: best.it, score: best.score });
+  }
+  return out.sort((a, b) => a.score - b.score);
+}
+
+// Search every exercise by words ("incline db" finds Incline Dumbbell Press…).
+function search(text, limit = 40) {
+  const qw = norm(text).split(' ').filter(Boolean); if (!qw.length) return [];
+  const hit = (nk) => { const ws = nk.split(' '); return qw.every((w, i) => ws.some(x => i === qw.length - 1 ? x.startsWith(w) : x === w)); };
+  const out = [], seen = new Set();
+  const add = (name, group, source) => { const k = norm(name); if (seen.has(k)) return; seen.add(k); out.push({ name, group, source }); };
+  for (const e of EX) if (hit(norm(e.name)) || e.aliases.some(a => hit(norm(a)))) add(e.name, e.group, 'MaxxTempo');
+  for (const l of LIBS) for (const it of l.items) if (hit(it.nk)) add(it.n, it.g, l.source);
+  return out.sort((a, b) => (b.source === 'MaxxTempo') - (a.source === 'MaxxTempo') || a.name.length - b.name.length).slice(0, limit);
 }
 
 function findExercise(t, idx) {
@@ -280,6 +332,6 @@ function recovery(exercises) {
     tips: ['Hit your protein target today and tomorrow.', 'Aim for 7–9 hours of sleep tonight.', hours >= 72 ? 'Light movement or mobility work tomorrow helps; skip heavy work for these muscles.' : 'Other muscle groups or light cardio are fine tomorrow.'] };
 }
 
-const api = { EXERCISES: EX, norm, buildIndex, parsePart, readSets, readCardio, recovery };
+const api = { EXERCISES: EX, norm, buildIndex, parsePart, readSets, readCardio, recovery, setLibraries, libVersion, howto, search, libraries: () => LIBS };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Gym = api;
 })(this);
