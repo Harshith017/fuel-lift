@@ -155,7 +155,7 @@ const S = {
   gymPeriod:'week', gymEx:null, trendRange:30,
   libFoods:[], libBusy:false, libStatus:'', mcp:null,
   myFoods:{}, myFoodsVer:0, _fidx:null, _fidxVer:-1,
-  reports:[], repSel:null, repMarker:null, repBusy:false, repStatus:'', reviews:[], plans:[], planBusy:false, planStatus:'', planFor:null, planNote:'', revBusy:false, revStatus:'', ideas:null, ideasBusy:false,
+  reports:[], repSel:null, repMarker:null, repBusy:false, repStatus:'', reviews:[], plans:[], planBusy:false, planStatus:'', planFor:null, planNote:'', revBusy:false, revStatus:'',
   queue:[], qBusy:false, qStatus:'', setup:null, setupShown:false,
   photo:null, photoUrl:null, busy:false, ctl:null, status:'', statusErr:false,
   rev:0, openFolds:(()=>{ try { return new Set(JSON.parse(localStorage.getItem('fl:folds')||'[]')); } catch { return new Set(); } })(), sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
@@ -1117,7 +1117,7 @@ function markerTrend(reps){
   return `<h3>${esc(name)} over time</h3>${lineChart({pts, unit:(reps[0].markers.find(m=>m.key===key)||{}).unit||'', color:'var(--fat)', wide:true})}`;
 }
 
-/* ---------- weekly review + meal ideas ---------- */
+/* ---------- weekly review ---------- */
 function weekDigest(){
   const lines=[]; const T=targets();
   for (let i=6;i>=0;i--){ const date=addDays(localDate(),-i); const d=S.days.get(date); if(!d) { lines.push(`${date}: nothing logged`); continue; }
@@ -1174,23 +1174,6 @@ function reviewPanel(){
         <tr><td class="l"><b>Total</b></td><td></td><td class="r"><b>${n0(r.sample_day.reduce((s,m)=>s+m.kcal,0))}</b></td><td class="r"><b>${n0(r.sample_day.reduce((s,m)=>s+m.protein,0))} g</b></td></tr></tbody></table></div>`:''}`
       :'<div class="muted small">Looks at your food, nutrient gaps, sleep, training load, weight trend and any blood-test flags, then tells you what to change next week.</div>'}
   </section>`;
-}
-async function runIdeas(){
-  if (!S.sample) return;
-  const d=getDay(S.date), t=dayTotals(d), T=dayTargets(d); const ra=prof().report_adjust;
-  const low = MICROS.filter(m=>m.kind!=='limit').map(m=>({m,p:t.micros[m.key]/(T.micros[m.key]||1)})).filter(x=>x.p<0.6).map(x=>x.m.label).slice(0,5);
-  const over = MICROS.filter(m=>m.kind==='limit' && t.micros[m.key] > (T.micros[m.key]||1)*0.8).map(m=>m.label);
-  S.ideasBusy=true; S.ideas=null; render();
-  try {
-    const res = await S.sample.json(`Suggest 3 different options for this person's next meal at ${nowTime()} in India. Remaining for today: ${n0(T.kcal-t.kcal)} kcal, protein ${n0(T.protein-t.protein)} g, carbs ${n0(T.carbs-t.carbs)} g, fat ${n0(T.fat-t.fat)} g. Nutrients still low today: ${low.join(', ')||'none'}. Close to or over the limit: ${over.join(', ')||'none'}.${ra&&ra.focus&&ra.focus.length?` Blood-test focus: ${ra.focus.join(', ')}.`:''} Already eaten: ${(d.foods||[]).map(f=>f.name).join(', ')||'nothing yet'}. Goal: ${(GOALS[prof().goal]||{}).label}. Use everyday Indian foods with gram amounts. Reply with ONLY a JSON array: [{"name":"Grilled paneer wrap","items":"100 g paneer, 1 whole-wheat roti, salad","kcal":450,"protein_g":28,"why":"one short reason"}]`, {task:'ideas'});
-    S.ideas = (Array.isArray(res)?res:[]).slice(0,3).map(x=>({name:String(x.name||'').slice(0,60), items:String(x.items||'').slice(0,200), kcal:num(x.kcal,3000), protein:num(x.protein_g,300), why:String(x.why||'').slice(0,200)}));
-  } catch(e) { S.ideas=[]; toast(AI_ERR[e?.code]||'Couldn’t get meal ideas. Try again.'); }
-  finally { S.ideasBusy=false; render(); }
-}
-function ideasHtml(){
-  if (S.ideasBusy) return '<div class="muted small">Thinking of meals that fit…</div>';
-  if (!S.ideas || !S.ideas.length) return '';
-  return `<div class="ideas">${S.ideas.map((x,i)=>`<div class="idea"><b>${esc(x.name)}</b><div class="small">${esc(x.items)}</div><div class="muted small">${n0(x.kcal)} kcal · ${n0(x.protein)} g protein · ${esc(x.why)}</div><button class="linkbtn" data-action="useIdea" data-i="${i}">I ate this, put it in the log box</button></div>`).join('')}</div>`;
 }
 
 /* ---------- recent foods ---------- */
@@ -1414,7 +1397,7 @@ function planCard(compact){
     else {
       if (plan.warmup) body += `<div class="small"><b>Warm-up:</b> ${esc(plan.warmup)}</div>`;
       body += `<div class="tablewrap"><table class="plantable"><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th><span class="sr">Edit</span></th></tr></thead><tbody>
-        ${plan.exercises.map((e,i)=>`<tr><td class="l"><button class="linkbtn exname" data-action="howto" data-name="${esc(e.name)}"><b>${esc(e.name)}</b></button>${e.edited?' <span class="tag">edited</span>':''}<div class="muted small">${[e.rest?`rest ${esc(e.rest)}`:'', e.note?esc(e.note):''].filter(Boolean).join(' · ')}</div></td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${esc(e.weight)}</td><td class="r"><button class="editbtn" data-action="planEx" data-i="${i}" aria-label="Edit ${esc(e.name)}">✎</button></td></tr>`).join('')}</tbody></table></div>
+        ${plan.exercises.map((e,i)=>`<tr class="exrow1"><td class="l"><b>${esc(e.name)}</b>${e.edited?' <span class="tag">edited</span>':''}<div class="muted small">${[e.rest?`rest ${esc(e.rest)}`:'', e.note?esc(e.note):''].filter(Boolean).join(' · ')}</div></td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${esc(e.weight)}</td><td class="r"><button class="editbtn" data-action="planEx" data-i="${i}" aria-label="Edit ${esc(e.name)}">✎</button></td></tr><tr class="howrow"><td colspan="4">${howtoFold(e.name)}</td></tr>`).join('')}</tbody></table></div>
         <div class="row"><button class="btn ghost sm" data-action="planEx" data-i="-1">+ Add exercise</button><span class="muted small">Your edits become the starting point for future plans.</span></div>`;
       if (plan.finisher) body += `<div class="small"><b>Finish with:</b> ${esc(plan.finisher)}</div>`;
       if (plan.short) body += `<div class="small"><b>Short on time:</b> ${esc(plan.short)}</div>`;
@@ -1539,10 +1522,11 @@ function sportList(day){
 function exerciseList(day){
   const ex = day.exercises||[];
   if (!ex.length) return `<div class="empty">No training logged. Try “squat 80x5, 85x5, 90x3”.</div>`;
-  return ex.map(e=>`<div class="item"><div><div class="nm"><button class="linkbtn exname" data-action="howto" data-name="${esc(e.name)}" aria-label="How to do ${esc(e.name)}">${esc(e.name)}</button> <span class="tag">${esc(e.muscle_group)}</span></div>
+  return ex.map(e=>`<div class="item"><div><div class="nm">${esc(e.name)} <span class="tag">${esc(e.muscle_group)}</span></div>
     <div class="sub">${(e.sets||[]).length ? e.sets.map(s=>s.weight>0?`${n1(s.weight)} × ${s.reps}`:`${s.reps} reps`).join(' · ') : ''}${e.duration_min?`${(e.sets||[]).length?' · ':''}${n0(e.duration_min)} min`:''}</div></div>
     <div class="kc">${n0(e.kcal)}<span class="muted small"> kcal</span></div>
-    <div class="acts"><button data-action="editEx" data-id="${e.id}" aria-label="Edit ${esc(e.name)}">Edit</button><button data-action="delEx" data-id="${e.id}" aria-label="Delete ${esc(e.name)}">✕</button></div></div>`).join('');
+    <div class="acts"><button data-action="editEx" data-id="${e.id}" aria-label="Edit ${esc(e.name)}">Edit</button><button data-action="delEx" data-id="${e.id}" aria-label="Delete ${esc(e.name)}">✕</button></div>
+    <div class="howwrap">${howtoFold(e.name)}</div></div>`).join('');
 }
 function sportSummary(a,b,label){
   const names = [...new Set([...Object.keys(a.sp), ...Object.keys(b.sp)])];
@@ -1764,6 +1748,28 @@ function libResults(q){
   if (!r.length) return `<div class="empty">No exercise matches “${esc(q)}”.</div>`;
   return r.map(x=>`<button class="exrow" data-action="howto" data-name="${esc(x.name)}"><span>${esc(x.name)}</span><span class="tag">${esc(x.group)}</span></button>`).join('');
 }
+// "How to do it" under an exercise: a fold whose content is filled the first time it opens.
+const howtoFold = name => `<details class="howfold" data-how="${esc(name)}"><summary>How to do it</summary><div class="howbody"></div></details>`;
+function howtoBody(name){
+  const hs = Gym.howto(name);
+  if (!hs.length) return `<div class="muted small">${libCount() ? 'No instructions for this exercise in the built-in libraries yet.' : 'The exercise library is still loading. Close and open this again in a moment.'}</div>`;
+  const pic = hs.find(h=>h.item.img && /\.gif$/i.test(h.item.img)) || hs.find(h=>h.item.img);
+  const text = hs.find(h=>(h.item.i||[]).length); const info = hs[0].item;
+  const credits = [...new Map(hs.map(h=>[h.source, h])).values()].map(h => h.source==='wger'
+    ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">wger.de</a> (${esc(h.item.lic||'CC-BY-SA')}, ${esc(h.item.by||'wger.de')})`
+    : h.source==='ExerciseDB' ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">ExerciseDB</a> (free version, non-commercial)`
+    : `<a href="${esc(h.url)}" target="_blank" rel="noopener">free-exercise-db</a> (public domain)`).join(' · ');
+  return `${pic ? `<img class="howimg" src="${esc(pic.item.img)}" alt="${esc(pic.item.n)} demonstration" loading="lazy">` : ''}
+    <div class="small muted">${[info.g, (info.mu||[]).join(', '), (info.s||[]).length?`also ${info.s.join(', ')}`:'', info.eq].filter(Boolean).map(esc).join(' · ')}</div>
+    ${text ? `<ol class="tips howsteps">${text.item.i.slice(0,10).map(x=>`<li>${esc(x)}</li>`).join('')}</ol>` : ''}
+    <div class="muted small">From ${credits}.${text && text.item.n!==name ? ` Closest match: ${esc(text.item.n)}.` : ''}</div>`;
+}
+document.addEventListener('toggle', ev => {
+  const det = ev.target; if (!det.matches || !det.matches('details.howfold') || !det.open) return;
+  const body = det.querySelector('.howbody'); if (!body || body.dataset.done) return;
+  body.innerHTML = howtoBody(det.dataset.how||''); body.dataset.done = libCount() ? '1' : '';
+  const img = body.querySelector('.howimg'); if (img) img.addEventListener('error', () => img.remove());
+}, true);
 function openHowto(name){
   const hs = Gym.howto(name); const d = $('#dlg');
   const pic = hs.find(h=>h.item.img && /\.gif$/i.test(h.item.img)) || hs.find(h=>h.item.img);
@@ -2108,10 +2114,6 @@ function viewProfile(){
   const plan = (S.plans||[]).find(x=>x.date>=localDate());
   return `<div class="grid">
     <div class="panel-head"><h2>Coach</h2></div>
-    <section class="panel"><div class="panel-head"><h3>What to eat next</h3><span class="muted small">${n0(Math.max(0,TT.kcal-t.kcal))} kcal · ${n0(Math.max(0,TT.protein-t.protein))} g protein left</span></div>
-      <div class="row"><button class="btn sm" data-action="ideas" ${S.ideasBusy||S.aiState==='off'?'disabled':''}>${S.ideas&&S.ideas.length?'Suggest again':'Suggest meals'}</button></div>
-      ${ideasHtml()}
-    </section>
     <section class="panel"><div class="panel-head"><h3>What to train or play</h3>${plan?`<span class="muted small">${esc(plan.date===localDate()?'Today':fmtDate(plan.date,{weekday:'long'}))}</span>`:''}</div>
       ${plan ? `<div class="plan-h"><b>${esc(plan.focus)}</b><span class="pill ${plan.readiness==='good'?'good':plan.readiness==='low'?'bad':'warn'}">readiness ${esc(plan.readiness)}</span></div><div class="small">${esc(plan.why)}</div>`
         : '<div class="muted small">Plans your next gym session or sport day from what you did this week, your recovery and your recent weights.</div>'}
@@ -2426,8 +2428,6 @@ document.addEventListener('click', ev => {
     case 'planToLog': { const pl=(S.plans||[]).find(x=>x.date>=localDate()); if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (!pl||!ta) break;
       ta.value = pl.exercises.map(e=>{ const w=planKg(e); return `${e.name} ${e.sets||3}x${String(e.reps).replace(/[^\d-]/g,'').split('-').pop()||8}${w?' @'+w+'kg':''}`; }).join(', ');
       ta.focus(); ta.scrollIntoView({block:'center'}); setStatus('Edit anything you did differently, then tap Log.'); break; }
-    case 'ideas': runIdeas(); break;
-    case 'useIdea': { const x=(S.ideas||[])[+b.dataset.i]; if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (x&&ta) { ta.value=`${x.name}: ${x.items}`; ta.focus(); ta.scrollIntoView({block:'center'}); } break; }
     case 'relog': { let f=null; for (const [,d] of S.days) { f=(d.foods||[]).find(y=>y.id===b.dataset.id); if (f) break; } if(!f) break;
       const copy={...structuredClone(f), id:uid(), time:nowTime(), meal:guessMeal()}; const date=S.date;
       writeDay(date, d=>d.foods.push(copy)); toast(`Logged ${f.name}`, () => writeDay(date, d => { d.foods=d.foods.filter(y=>y.id!==copy.id); })); break; }

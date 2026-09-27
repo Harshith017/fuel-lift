@@ -241,6 +241,16 @@ details.micros>summary .muted{white-space:nowrap;margin-left:auto}
 .plantable td,.plantable th{padding-left:6px;padding-right:6px} .plantable td:first-child,.plantable th:first-child{padding-left:0}
 .editbtn{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:16px;line-height:1}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.howwrap{grid-column:1/-1}
+.howfold summary{cursor:pointer;list-style:none;font-size:13px;font-weight:600;color:var(--accent-text);padding:4px 0;display:inline-flex;align-items:center;gap:6px}
+.howfold summary::-webkit-details-marker{display:none}
+.howfold summary::after{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translateY(-2px);transition:transform .15s}
+.howfold[open] summary::after{transform:rotate(-135deg) translateY(-1px)}
+.howbody{display:flex;flex-direction:column;gap:8px;padding:6px 0 10px}
+.plantable .howrow td{padding-top:0;border-top:0;white-space:normal}
+.plantable td:first-child{white-space:normal}
+.howbody .howimg{max-width:100%}
+.plantable tr.exrow1 td{border-bottom:0}
 .exname{font:inherit;font-weight:inherit;color:inherit;text-align:left;text-decoration:underline dotted;text-underline-offset:3px;padding:0}
 .exres{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto}
 .exrow{display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit}
