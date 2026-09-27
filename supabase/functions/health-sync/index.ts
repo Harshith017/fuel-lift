@@ -67,24 +67,41 @@ function durationText(v: unknown): number | null {
 }
 // Sleep may arrive as minutes, hours or seconds; take the named field, else guess by size.
 function sleepMinutes(b: Record<string, unknown>): number | null {
-  for (const f of ["sleep", "sleep_min", "sleep_minutes", "sleep_hours", "sleep_seconds"]) { const d = durationText(b[f]); if (d != null) return d; }
+  for (const f of ["sleep", "sleep_min", "sleep_minutes", "sleep_hours", "sleep_seconds"]) { const v = b[f]; const d = durationText(Array.isArray(v) ? v.map(String).join("\n") : v); if (d != null) return d; }
   const s = num(b.sleep_seconds); if (s != null) return s / 60;
   const m = num(b.sleep_min ?? b.sleep_minutes); if (m != null) return m;
   const h = num(b.sleep_hours); if (h != null) return h * 60;
   const g = num(b.sleep); if (g == null) return null;
   return g <= 24 ? g * 60 : g <= 1440 ? g : g / 60;
 }
+// What arrived, without any values: content type, field names and their types.
+// Values appear only as their format, digits masked ("9999 count", "9 hr 99 min"),
+// and never the key.
+const fmt = (k: string, v: unknown) => {
+  if (k === "key") return "…";
+  const t = Array.isArray(v) ? `[${v.length}] ` + JSON.stringify(v[0] ?? null) : typeof v === "object" && v ? JSON.stringify(v) : String(v);
+  return JSON.stringify(t.replace(/\d/g, "9").replace(/[A-Za-z0-9_-]{24,}/g, "…").slice(0, 60));
+};
+const shape = (b: Record<string, unknown>, ct: string) =>
+  `${ct.split(";")[0] || "no content-type"} · ` + Object.entries(b).map(([k, v]) => `${k.slice(0, 20)}:${Array.isArray(v) ? "list" : typeof v}=${fmt(k, v)}`).join(", ").slice(0, 600);
+async function logAttempt(userId: string | null, status: number, code: string, detail: string) {
+  try {
+    await admin.from("health_attempts").insert({ user_id: userId, status, code, detail });
+    const { data } = await admin.from("health_attempts").select("id").order("id", { ascending: false }).range(100, 100);
+    if (data?.[0]) await admin.from("health_attempts").delete().lte("id", data[0].id);
+  } catch { /* diagnostics only */ }
+}
 const within = (v: number | null, lo: number, hi: number) => v != null && v >= lo && v <= hi ? Math.round(v) : null;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (req.method !== "POST") return fail(405, "method_not_allowed", "Use POST.");
+  if (req.method !== "POST") { await logAttempt(null, 405, "method_not_allowed", req.method); return fail(405, "method_not_allowed", "Use POST (in Get Contents of URL, set Method to POST)."); }
   if (Number(req.headers.get("content-length") ?? 0) > 32_000) return fail(413, "too_large");
   let body: Record<string, unknown>;
   try {
     const text = await req.text();
     body = text.trim().startsWith("{") ? JSON.parse(text) : Object.fromEntries(new URLSearchParams(text));
-  } catch { return fail(400, "bad_request", "Send JSON."); }
+  } catch { await logAttempt(null, 400, "bad_request", "unreadable body · " + (req.headers.get("content-type") ?? "")); return fail(400, "bad_request", "Send JSON."); }
   if (!body || typeof body !== "object") return fail(400, "bad_request", "Send JSON.");
 
   try {
@@ -110,24 +127,34 @@ Deno.serve(async (req) => {
     }
 
     // ---- From the Shortcut ----
-    const key = String(body.key ?? (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")).trim();
-    if (!/^mt_[A-Za-z0-9_-]{32}$/.test(key)) return fail(401, "bad_key", "The sync key is missing or wrong. Copy it again from MaxxTempo → Profile → Settings → Watch & health apps.");
+    const ct = req.headers.get("content-type") ?? "";
+    let who: string | null = null;
+    const done = async (status: number, code: string, message: string, extra: Record<string, unknown> = {}) => {
+      await logAttempt(who, status, code, shape(body, ct));
+      return reply(status, { ok: status < 300, code, message, ...extra });
+    };
+    // The key normally comes as "key"; a Shortcut row whose name was left blank
+    // still carries it, so take any field whose value looks like a sync key.
+    const looksKey = (v: unknown) => typeof v === "string" && /^mt_[A-Za-z0-9_-]{32}$/.test(v.trim());
+    const key = String(body.key ?? Object.values(body).find(looksKey) ?? (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")).trim();
+    if (!/^mt_[A-Za-z0-9_-]{32}$/.test(key)) return done(401, "bad_key", "The sync key is missing or wrong. Copy it again from MaxxTempo → Profile → Settings → Watch & health apps.");
     const { data: hk } = await admin.from("health_keys").select("user_id,last_sync_at").eq("key_hash", await sha256(key)).maybeSingle();
-    if (!hk) return fail(401, "bad_key", "This sync key isn't active. Create a new one in MaxxTempo → Profile → Settings → Watch & health apps.");
-    if (hk.last_sync_at && Date.now() - Date.parse(hk.last_sync_at) < 10_000) return fail(429, "too_often", "Synced a moment ago. Try again in a few seconds.");
+    if (!hk) return done(401, "bad_key", "This sync key isn't active. Create a new one in MaxxTempo → Profile → Settings → Watch & health apps.");
+    who = hk.user_id;
+    if (hk.last_sync_at && Date.now() - Date.parse(hk.last_sync_at) < 10_000) return done(429, "too_often", "Synced a moment ago. Try again in a few seconds.");
     const { data: m } = await admin.from("members").select("status").eq("user_id", hk.user_id).maybeSingle();
-    if (m?.status !== "approved") return fail(403, "not_approved", "Your MaxxTempo account isn't approved.");
+    if (m?.status !== "approved") return done(403, "not_approved", "Your MaxxTempo account isn't approved.");
 
     const now = today();
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date ?? "")) ? String(body.date) : now;
-    if (date > addDays(now, 1) || date < addDays(now, -7)) return fail(400, "bad_date", "Date must be within the last 7 days (format 2026-09-27).");
+    if (date > addDays(now, 1) || date < addDays(now, -7)) return done(400, "bad_date", "Date must be within the last 7 days (format 2026-09-27).");
 
     const vals: Record<string, number> = {};
     const steps = within(num(body.steps), 0, 150_000); if (steps != null) vals.steps = steps;
     const active = within(num(body.active_kcal ?? body.active_energy ?? body.active), 0, 10_000); if (active != null) vals.active_kcal = active;
     const resting = within(num(body.resting_kcal ?? body.resting_energy ?? body.resting), 0, 6_000); if (resting != null) vals.resting_kcal = resting;
     const sleep = within(sleepMinutes(body), 0, 1_200); if (sleep != null && sleep > 0) vals.sleep_min = sleep;
-    if (!Object.keys(vals).length) return fail(400, "no_values", "Nothing to save. Send steps, active_kcal and/or sleep_min.");
+    if (!Object.keys(vals).length) return done(400, "no_values", "Nothing to save. Send steps, active_kcal and/or sleep_min.");
 
     const { data: cur } = await admin.from("docs").select("data").eq("user_id", hk.user_id).eq("collection", "health").eq("id", date).maybeSingle();
     const data = { ...(cur?.data ?? {}), ...vals, date, synced_at: new Date().toISOString(), source: "shortcut" };
@@ -135,7 +162,7 @@ Deno.serve(async (req) => {
     if (error) throw error;
     await admin.from("health_keys").update({ last_sync_at: new Date().toISOString() }).eq("user_id", hk.user_id);
     const said = [vals.steps != null && `${vals.steps} steps`, vals.active_kcal != null && `${vals.active_kcal} active kcal`, vals.sleep_min != null && `${Math.floor(vals.sleep_min / 60)}h ${vals.sleep_min % 60}m sleep`].filter(Boolean).join(", ");
-    return reply(200, { ok: true, date, saved: vals, message: `MaxxTempo: saved ${said} for ${date}.` });
+    return done(200, "ok", `MaxxTempo: saved ${said} for ${date}.`, { date, saved: vals });
   } catch (e) {
     console.error("health-sync", e instanceof Error ? e.message : e);
     return fail(500, "server_error", "Couldn't save. Try again later.");
