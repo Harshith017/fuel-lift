@@ -101,3 +101,16 @@ test("built-in food data files are well formed", function () {
   var almonds = usda.items.find(function (r) { return r[0] === "Nuts, almonds"; });
   assert.ok(Math.abs(almonds[3] - 579) < 5 && Math.abs(almonds[4] - 21.2) < 1);
 });
+
+test("how-to finds pictures for the names AI plans use, and nothing wrong for unknown ones", function () {
+  var fs = require("node:fs");
+  G.setLibraries(["ex-free", "ex-wger", "ex-edb"].map(function (f) { return JSON.parse(fs.readFileSync(__dirname + "/data/" + f + ".json", "utf8")); }));
+  ["Barbell Flat Bench Press", "Flat Dumbbell Flyes", "Cable Crossover (Mid-Chest)", "Standard Push-ups", "Barbell Back Squat", "Romanian Deadlift (RDL)",
+   "Rope Tricep Pushdown", "Walking Lunges (Dumbbell)", "Hanging Leg Raises", "Close-Grip Bench Press", "Incline Barbell Bench Press"].forEach(function (n) {
+    var h = G.howto(n); assert.ok(h.length && h.some(function (x) { return x.item.img; }), n);
+  });
+  assert.ok(G.howto("Incline Barbell Bench Press").every(function (x) { return /incline/i.test(x.item.n); }), "incline never matches flat");
+  ["Copenhagen Plank", "Jefferson Curl"].forEach(function (n) { assert.strictEqual(G.howto(n).length, 0, n); });
+  assert.ok(G.howto("Landmine Press").every(function (x) { return /landmine/i.test(x.item.n); }));
+  G.setLibraries([]);
+});
