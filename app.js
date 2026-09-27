@@ -124,7 +124,7 @@ function computeTargets(p, date){
     tdee:Math.round(formula), maint:Math.round(maint), maintSource:useAd?'measured':'formula', adaptive:ad,
     goalDelta:Math.round(tg.delta), floored:tg.floored && !(Number(p.calorie_override)>0), floor:tg.floor,
     kcal,protein,carbs,fat,
-    fiber:Math.round(kcal/1000*14), sugar:Math.round(kcal*0.1/4),
+    fiber: Number(p.fiber_override)>0 ? Number(p.fiber_override) : Math.round(kcal/1000*14), sugar:Math.round(kcal*0.1/4),
     water_ml: Number(p.water_override_ml)>0 ? Number(p.water_override_ml) : Math.round(kg*35/250)*250,
     micros:{...Calc.microTargets(sex, w.age), sat_fat_g:Math.round(kcal*0.1/9)}, focus:[]};
   const ra = p.report_adjust;
@@ -145,7 +145,7 @@ function dayTargets(day, T){
   T = T || computeTargets(prof(), day.date);
   const p = prof(), ex = dayTotals(day).burned;
   const add = p.eat_back===false || Number(p.calorie_override)>0 ? 0 : Math.round(ex);
-  return {...T, base:T.kcal, training:add, kcal:T.kcal+add, carbs:T.carbs+Math.round(add/4), fiber:Math.round((T.kcal+add)/1000*14)};
+  return {...T, base:T.kcal, training:add, kcal:T.kcal+add, carbs:T.carbs+Math.round(add/4), fiber: Number(p.fiber_override)>0 ? T.fiber : Math.round((T.kcal+add)/1000*14)};
 }
 
 /* ---------- state ---------- */
@@ -162,7 +162,7 @@ const S = {
 };
 const prof = () => ({...DEFAULT_PROFILE, ...(S.profile||{})});
 const targets = (date) => computeTargets(prof(), date);
-const suggestedTargets = () => computeTargets({...prof(), calorie_override:null, protein_override:null, carbs_override:null, fat_override:null, water_override_ml:null}, localDate());
+const suggestedTargets = () => computeTargets({...prof(), calorie_override:null, protein_override:null, carbs_override:null, fat_override:null, fiber_override:null, water_override_ml:null}, localDate());
 const emptyDay = date => ({date, foods:[], water:[], exercises:[], weight_kg:null});
 const getDay = date => S.days.get(date) || emptyDay(date);
 
@@ -1726,7 +1726,7 @@ function goalsForm(){
   const p = prof(), T = targets(), SG = suggestedTargets();
   return `<form class="form profForm">
         <div class="full muted small">Leave a box empty to use the suggested goal.</div>
-        ${[['pf_kcal','calorie_override','Calories','kcal',SG.kcal,1000,6000,10],['pf_prot','protein_override','Protein','g',SG.protein,30,400,1],['pf_carbs','carbs_override','Carbs','g',SG.carbs,0,900,1],['pf_fat','fat_override','Fat','g',SG.fat,20,300,1],['pf_water','water_override_ml','Water','ml',SG.water_ml,1000,8000,250]].map(([id,key,label,unit,sug,mn,mx,st])=>`
+        ${[['pf_kcal','calorie_override','Calories','kcal',SG.kcal,1000,6000,10],['pf_prot','protein_override','Protein','g',SG.protein,30,400,1],['pf_carbs','carbs_override','Carbs','g',SG.carbs,0,900,1],['pf_fat','fat_override','Fat','g',SG.fat,20,300,1],['pf_fibre','fiber_override','Fibre','g',SG.fiber,10,120,1],['pf_water','water_override_ml','Water','ml',SG.water_ml,1000,8000,250]].map(([id,key,label,unit,sug,mn,mx,st])=>`
           <label class="field">${label} (${unit})<input id="${id}" name="${key}" type="number" min="${mn}" max="${mx}" step="${st}" placeholder="Suggested ${n0(sug)}" value="${esc(p[key]??'')}">
           <span class="hint">${p[key]?`Yours · suggested ${n0(sug)} <button type="button" class="linkbtn" data-action="resetGoal" data-key="${key}" style="padding:0 2px">Use suggested</button>`:`Suggested ${n0(sug)} ${unit}`}</span></label>`).join('')}
         <label class="field">Daily steps goal<input id="pf_steps" name="steps_goal" type="number" min="1000" max="50000" step="500" value="${esc(p.steps_goal??10000)}"></label>
@@ -1738,7 +1738,7 @@ function goalsForm(){
         <span>Resting burn (${esc(T.bmrMethod)})</span><b>${n0(T.bmr)} kcal</b>
         <span>Maintenance used</span><b>${n0(T.maint)} kcal <span class="tag">${T.maintSource}</span></b>
         <span>Goal</span><b>${T.goalDelta>0?'+':T.goalDelta<0?'−':''}${n0(Math.abs(T.goalDelta))} kcal</b>
-        <span>Fibre</span><b>${n0(T.fiber)} g</b><span>Added sugar, up to</span><b>${n0(T.sugar)} g</b>
+        <span>Fibre${p.fiber_override?' <span class="tag">yours</span>':''}</span><b>${n0(T.fiber)} g</b><span>Added sugar, up to</span><b>${n0(T.sugar)} g</b>
       </div>
       <div class="muted small">Protein is ${GOALS[p.goal]?.ppk||1.6} g per kg${T.refKg<T.weight-0.5?` of ${n1(T.refKg)} kg (your weight at BMI 25)`:' of body weight'}. Fat is 25% of calories, carbs fill the rest. ${p.goal==='lose'?`Losing ${p.goal_rate} kg a week takes about ${n0(p.goal_rate*7700/7)} kcal a day under maintenance.`:p.goal==='gain'?`Gaining ${p.goal_rate} kg a week takes about ${n0(p.goal_rate*7700/7)} kcal a day over maintenance.`:''} ${T.floored?`Capped at ${n0(T.floor)} kcal for safety; pick a slower rate.`:''}</div>`;
 }
@@ -2010,7 +2010,7 @@ function onProfileSubmit(ev){
   const p = {...prof(), name:($('#pf_name')?.value||'').trim().slice(0,40), sex:v('#pf_sex'), birth, age:birth?Calc.ageOn(birth, localDate()):prof().age, height_cm:num(v('#pf_height'),250)||170, weight_kg:num(v('#pf_weight'),300)||70,
     body_fat:bf, maint_source:v('#pf_maint'), eat_back:$('#pf_eatback').checked,
     activity:v('#pf_act'), goal:v('#pf_goal'), goal_rate:Number(v('#pf_rate'))||0.5,
-    calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000};
+    calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), fiber_override:optNum(v('#pf_fibre'),120), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000};
   saveProfile(p); toast('Profile saved. Targets updated.');
 }
 function setView(v){ S.view=v; S.status=''; S.statusErr=false; render(); window.scrollTo({top:0}); if (v==='trends') loadBoard(); }
