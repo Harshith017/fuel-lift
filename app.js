@@ -423,6 +423,7 @@ const AI_ERR = {
   session_expired:'You’ve been signed out. Sign in again, then log this entry.',
   daily_cap:'You’ve used today’s AI allowance. The food table and saved foods still log instantly; AI is back tomorrow.',
   not_invited:'AI features are invite-only on this app. Ask the owner to add your email.',
+  not_approved:'Your account is waiting for the owner’s approval.',
   server_config:'The app’s AI key isn’t set up correctly. The owner needs to check the GEMINI_API_KEY or ANTHROPIC_API_KEY secret.',
   unavailable:'Couldn’t reach AI. Your entry is still here; try again.',
   offline:'You’re offline. Food-table items still log; try AI again when you’re back online.',
@@ -854,6 +855,8 @@ function staleSports(){
 }
 function todayBanners(){
   let h='';
+  const waiting = S.isAdmin ? (S.members||[]).filter(x=>x.status==='pending').length : 0;
+  if (waiting) h += `<div class="banner" style="margin-bottom:16px;border-left-color:var(--accent)">${waiting} ${waiting===1?'person is':'people are'} waiting for you to approve them. <button class="linkbtn" data-action="reviewPeople">Review</button></div>`;
   if (S.profile && !Object.keys(S.profile.sports||{}).length) h += `<div class="banner" style="margin-bottom:16px">Tell me which sports you play and how, so calories and recovery fit you. <button class="linkbtn" data-action="startSetup" data-step="sports">Set up my sports</button></div>`;
   for (const [k,v] of staleSports()) h += `<div class="banner" style="margin-bottom:16px">Your ${esc(v.name)} details are from ${esc(fmtDate(v.updated,{day:'numeric',month:'short',year:'numeric'}))}. Still how you play? <button class="linkbtn" data-action="updSport" data-key="${esc(k)}">Update</button><button class="linkbtn" data-action="stillRight" data-key="${esc(k)}">Still right</button></div>`;
   return h;
@@ -1809,6 +1812,7 @@ function viewProfile(){
       ${fold('s-profile', 'My details', `${esc(p.sex)} · ${n1(who(localDate()).kg)} kg · ${esc((GOALS[p.goal]||{}).label||'')}`, profileForm())}
       ${fold('s-data', 'Download my data', 'Excel', dataFold())}
       ${fold('s-connect', 'Watch &amp; health apps', p.watch_workouts?'watch on':'', connectFold())}
+      ${S.isAdmin ? fold('s-people', 'People &amp; approvals', (()=>{ const n=(S.members||[]).filter(x=>x.status==='pending').length; return n?`${n} waiting`:`${(S.members||[]).filter(x=>x.status==='approved').length} approved`; })(), peopleFold()) : ''}
       ${fold('s-sports', 'Sports &amp; food list', `${Object.keys(p.sports||{}).length} sport${Object.keys(p.sports||{}).length===1?'':'s'}`, `<h3>Sports you play</h3>${sportsProfileHtml()}<h3>Your food list</h3>${foodListHtml()}`)}
     </section>
   </div>`;
@@ -2098,7 +2102,10 @@ document.addEventListener('click', ev => {
     case 'authPassword': authPassword(); break;
     case 'authSignUp': authSignUp(); break;
     case 'setPassword': setPassword(); break;
-    case 'authGoogle': authGoogle(); break;
+    case 'authOAuth': authOAuth(b.dataset.p); break;
+    case 'recheckMember': if (S.pendingUser) startFor(S.pendingUser); break;
+    case 'memberSet': setMember(b.dataset.id, b.dataset.s); break;
+    case 'reviewPeople': S.openFolds.add('s-people'); setView('profile'); loadMembers(); break;
     case 'authBack': S.auth={step:'email', email:S.auth.email, msg:'', busy:false}; render(); break;
     case 'signOut': if (confirm(S.db&&S.db.pendingCount() ? `Sign out? ${S.db.pendingCount()} change(s) haven’t synced yet and will be lost.` : 'Sign out on this device? Your data stays in your account.')) signOut(); break;
     case 'exportData': exportData(); break;
@@ -2219,7 +2226,17 @@ async function importData(file){
 }
 
 let SB = null;
+function waitingView(){
+  const u = S.pendingUser, m = S.memberInfo||{}, nm = (u.user_metadata?.full_name || u.user_metadata?.name || '').split(' ')[0];
+  if (m.status==='declined') return `<section class="panel setup"><h2>Access not approved</h2>
+    <p>${esc(u.email||'This account')} isn’t approved to use MaxxTempo. If you think that’s a mistake, ask the owner.</p>
+    <div class="row"><span class="spacer"></span><button class="btn ghost" data-action="signOut">Sign out</button></div></section>`;
+  return `<section class="panel setup"><h2>${nm?`Thanks, ${esc(nm)}!`:'Almost in'}</h2>
+    <p>${m.status==='unknown' ? 'Couldn’t check your access. Check your connection and try again.' : `Your request to join has been sent. You’ll be let in as soon as the owner approves <b>${esc(u.email||'your account')}</b>. After that you sign in as normal, no approval needed again.`}</p>
+    <div class="row"><button class="btn ghost" data-action="signOut">Sign out</button><span class="spacer"></span><button class="btn" data-action="recheckMember">Check again</button></div></section>`;
+}
 function authView(){
+  if (S.pendingUser) return waitingView();
   const a = S.auth, cfgOk = window.FL_CONFIG && /^https:\/\//.test(FL_CONFIG.SUPABASE_URL||'') && FL_CONFIG.SUPABASE_ANON_KEY && !/YOUR_/.test(FL_CONFIG.SUPABASE_ANON_KEY);
   if (!cfgOk) return `<section class="panel setup"><h2>Almost there</h2><p>This copy of MaxxTempo isn’t connected to a database yet. Put your Supabase project URL and anon key in <b>config.js</b>, following SETUP.md.</p></section>`;
   if (a.step==='confirm') return `<section class="panel setup"><h2>Confirm your email</h2>
@@ -2232,7 +2249,10 @@ function authView(){
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
   return `<section class="panel setup"><h2>Sign in</h2>
     <p class="muted">Your food, training and health logs are private to you and sync across your phone and laptop.</p>
-    ${FL_CONFIG.GOOGLE_SIGN_IN?`<button class="btn" data-action="authGoogle" style="width:100%">Continue with Google</button><div class="muted small" style="text-align:center">or</div>`:''}
+    ${FL_CONFIG.GOOGLE_SIGN_IN||FL_CONFIG.APPLE_SIGN_IN ? `<div class="authalt">
+      ${FL_CONFIG.GOOGLE_SIGN_IN?`<button class="btn provider" data-action="authOAuth" data-p="google" ${a.busy?'disabled':''}><svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.5z"/></svg><span>Continue with Google</span></button>`:''}
+      ${FL_CONFIG.APPLE_SIGN_IN?`<button class="btn provider apple" data-action="authOAuth" data-p="apple" ${a.busy?'disabled':''}><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M16.4 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.9-3.5.9-.7 0-1.9-.8-3-.8-1.6 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.5 1.3-2.6-.1 0-2.5-.9-2.5-3.7zM14.1 5.6c.6-.8 1.1-1.8 1-2.9-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.7-1.3z"/></svg><span>Continue with Apple</span></button>`:''}
+    </div><div class="ordiv"><span>or use email</span></div>`:''}
     <label class="field">Email<input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(a.email)}"></label>
     <label class="field">Password<input id="authPass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></label>
     <div class="row"><button class="btn ghost" data-action="authSignUp" ${a.busy?'disabled':''}>Create account</button><span class="spacer"></span><button class="btn" data-action="authPassword" ${a.busy?'disabled':''}>${a.busy?'Working…':'Sign in'}</button></div>
@@ -2288,7 +2308,32 @@ async function setPassword(){
   toast(error ? 'Couldn’t set the password: '+error.message : 'Password set. Use it to sign in on any device, including the home-screen app.');
   if (!error && $('#newPass')) $('#newPass').value='';
 }
-async function authGoogle(){ await SB.auth.signInWithOAuth({ provider:'google', options:{ redirectTo:redirectTo() } }); }
+async function authOAuth(provider){
+  S.auth={...S.auth, busy:true, err:false, msg:''}; render();
+  const { error } = await SB.auth.signInWithOAuth({ provider, options:{ redirectTo:redirectTo() } });
+  if (error) { S.auth={...S.auth, busy:false, err:true, msg:`Couldn’t open ${provider==='apple'?'Apple':'Google'} sign-in. Try again, or use email.`}; render(); }
+}
+/* ---------- approvals (owner only) ---------- */
+async function loadMembers(){
+  if (!S.isAdmin || !SB) return;
+  const { data, error } = await SB.from('members').select('user_id,email,name,provider,status,is_admin,requested_at,decided_at').order('requested_at', {ascending:false});
+  if (!error) { S.members = data||[]; render(); }
+}
+async function setMember(id, status){
+  const m = (S.members||[]).find(x=>x.user_id===id); if (!m) return;
+  if (status==='declined' && m.status==='approved' && !confirm(`Remove ${m.name||m.email}’s access? They won’t be able to open their data until you approve them again.`)) return;
+  const { error } = await SB.rpc('set_member_status', { p_user:id, p_status:status });
+  if (error) { toast('Couldn’t update that. Try again.'); return; }
+  toast(status==='approved' ? `Approved ${m.name||m.email}` : `Declined ${m.name||m.email}`); loadMembers();
+}
+function peopleFold(){
+  const ms = S.members||[], pend = ms.filter(x=>x.status==='pending'), appr = ms.filter(x=>x.status==='approved'), dec = ms.filter(x=>x.status==='declined');
+  const who = x => `<div><div class="nm">${esc(x.name||x.email||'Unknown')}${x.is_admin?' <span class="tag">you</span>':''}</div><div class="sub">${esc(x.email||'')}${x.provider?` · ${esc(x.provider==='email'?'email':x.provider[0].toUpperCase()+x.provider.slice(1))}`:''} · ${esc(fmtDate((x.decided_at||x.requested_at).slice(0,10),{day:'numeric',month:'short'}))}</div></div>`;
+  return `${pend.length ? `<h3>Waiting for you</h3>${pend.map(x=>`<div class="item">${who(x)}<span></span><div class="acts"><button class="approve" data-action="memberSet" data-id="${x.user_id}" data-s="approved">Approve</button><button data-action="memberSet" data-id="${x.user_id}" data-s="declined">Decline</button></div></div>`).join('')}` : '<div class="muted small">Nobody is waiting. When someone signs in for the first time, they appear here for you to approve.</div>'}
+    <h3>Approved</h3>${appr.map(x=>`<div class="item">${who(x)}<span></span><div class="acts">${x.is_admin?'':`<button data-action="memberSet" data-id="${x.user_id}" data-s="declined">Remove</button>`}</div></div>`).join('')}
+    ${dec.length?`<h3>Declined</h3>${dec.map(x=>`<div class="item">${who(x)}<span></span><div class="acts"><button data-action="memberSet" data-id="${x.user_id}" data-s="approved">Approve</button></div></div>`).join('')}`:''}
+    <div class="row"><button class="btn ghost sm" data-action="reviewPeople">Refresh</button></div>`;
+}
 async function signOut(){
   if (S.db) await S.db.forget();
   await SB.auth.signOut(); location.reload();
@@ -2300,9 +2345,26 @@ async function refreshUsage(){
   render();
 }
 
+// Is this person approved? Cached on the device so the app still opens offline.
+async function memberStatus(user){
+  const key = 'mt:member:' + user.id;
+  let data = null, error = null;
+  try { ({ data, error } = await SB.from('members').select('status,is_admin').eq('user_id', user.id).maybeSingle()); } catch (e) { error = e; }
+  if (error) { let c=null; try { c = JSON.parse(localStorage.getItem(key)||'null'); } catch {} return c || {status:'unknown'}; }
+  const m = data || {status:'pending'};
+  try { if (m.status==='approved') localStorage.setItem(key, JSON.stringify(m)); else localStorage.removeItem(key); } catch {}
+  return m;
+}
+let memberCheck = null;
 async function startFor(user){
   if (S.user && S.user.id===user.id) return;
+  if (memberCheck) return memberCheck;
+  memberCheck = (async () => { const m = await memberStatus(user); memberCheck = null; return m; })();
+  const m = await memberCheck;
+  if (m.status!=='approved') { S.pendingUser = user; S.memberInfo = m; render(); return; }
+  S.pendingUser = null; S.isAdmin = !!m.is_admin;
   S.user = user; S.dbState='connecting'; render();
+  if (S.isAdmin) loadMembers();
   const db = FL.makeDb(SB, user.id, {
     onStatus: st => { if (S.sync!==st) { S.sync = st; render(); } },
     onError: code => { if (code==='too_large') toast('One change was too large to sync and was skipped.'); },
@@ -2327,6 +2389,9 @@ async function startFor(user){
   refreshUsage();
 }
 
+document.addEventListener('visibilitychange', () => { if (document.visibilityState!=='visible') return;
+  if (S.isAdmin) loadMembers();
+  if (S.pendingUser && S.memberInfo?.status!=='declined') startFor(S.pendingUser); });
 render();
 (async () => {
   const cfg = window.FL_CONFIG || {};
@@ -2336,7 +2401,7 @@ render();
   if (session?.user) startFor(session.user); else render();
   SB.auth.onAuthStateChange((ev, sess) => {
     if (sess?.user) startFor(sess.user);
-    else if (ev==='SIGNED_OUT') { S.user=null; render(); }
+    else if (ev==='SIGNED_OUT') { S.user=null; S.pendingUser=null; S.isAdmin=false; render(); }
   });
 })();
 })();
