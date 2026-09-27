@@ -94,4 +94,5 @@ That comes to roughly $3–5 a month for someone who logs every day, and under $
 ## Checking it works
 
 - `node --test calc.test.js` runs the unit tests for all the maths and the food table.
+- `node --test exercises.test.js` checks the built-in gym table and how it reads sets ("bench 60kg 3x8", "60x8, 65x6", "treadmill 20 min 3 km"). Gym entries it can read log without AI; anything unclear goes to the AI.
 - In the app, the dot after the logo shows sync: green is saved, amber is saving, grey is offline (still saved on the phone), red is retrying.
