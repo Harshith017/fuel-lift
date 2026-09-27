@@ -133,7 +133,10 @@ Deno.serve(async (req) => {
       await logAttempt(who, status, code, shape(body, ct));
       return reply(status, { ok: status < 300, code, message, ...extra });
     };
-    const key = String(body.key ?? (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")).trim();
+    // The key normally comes as "key"; a Shortcut row whose name was left blank
+    // still carries it, so take any field whose value looks like a sync key.
+    const looksKey = (v: unknown) => typeof v === "string" && /^mt_[A-Za-z0-9_-]{32}$/.test(v.trim());
+    const key = String(body.key ?? Object.values(body).find(looksKey) ?? (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")).trim();
     if (!/^mt_[A-Za-z0-9_-]{32}$/.test(key)) return done(401, "bad_key", "The sync key is missing or wrong. Copy it again from MaxxTempo → Profile → Settings → Watch & health apps.");
     const { data: hk } = await admin.from("health_keys").select("user_id,last_sync_at").eq("key_hash", await sha256(key)).maybeSingle();
     if (!hk) return done(401, "bad_key", "This sync key isn't active. Create a new one in MaxxTempo → Profile → Settings → Watch & health apps.");
