@@ -19,6 +19,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "https://harshith017.github.io";
 const RP_ID = new URL(ORIGIN).hostname;
 const RP_NAME = "MaxxTempo";
+const MAX_OPEN_LOGINS = 100; // unexpired sign-in challenges (each lives 5 minutes)
 
 const cors = {
   "Access-Control-Allow-Origin": ORIGIN,
@@ -61,8 +62,10 @@ async function takeChallenge(id: string, kind: "register" | "login") {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return fail(405, "method_not_allowed");
+  if (Number(req.headers.get("content-length") ?? 0) > 64_000) return fail(413, "too_large");
   let body: Record<string, any>;
   try { body = await req.json(); } catch { return fail(400, "bad_request"); }
+  if (!body || typeof body !== "object") return fail(400, "bad_request");
 
   try {
     switch (body.action) {
@@ -112,6 +115,10 @@ Deno.serve(async (req) => {
         return reply(200, { ok: true });
       }
       case "login-options": {
+        // Anyone can ask for a sign-in challenge, so cap how many can be open at once.
+        const { count } = await admin.from("webauthn_challenges").select("id", { count: "exact", head: true })
+          .eq("kind", "login").gt("expires_at", new Date().toISOString());
+        if ((count ?? 0) >= MAX_OPEN_LOGINS) return fail(429, "busy");
         const options = await generateAuthenticationOptions({ rpID: RP_ID, userVerification: "required", allowCredentials: [] });
         return reply(200, { ok: true, options, challengeId: await newChallenge(options.challenge, "login", null) });
       }
