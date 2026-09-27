@@ -368,6 +368,14 @@ h2.sect{font-size:17px;color:var(--ink-2);margin:8px 0 -4px}
 @media (max-width:380px){.ringwrap{width:124px;height:124px}.mrow{grid-template-columns:10px 1fr auto 36px 70px;gap:8px;font-size:13px}}
 /* Archivo: wider cut for headings and headline numbers, the athletic look */
 h1,h2,.brand,.nbig b,.ringc b,.stat3 b,.dcell .p,.excell .v,.tile .v,.big{font-stretch:112%}
+.authalt{display:flex;flex-direction:column;gap:10px}
+.btn.provider{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:12px 16px;background:var(--surface);color:var(--ink);border:1px solid var(--line);box-shadow:none;font-weight:600}
+.btn.provider:hover{border-color:var(--ink-3)}
+.btn.provider.apple{background:#000;color:#fff;border-color:#000}
+:root[data-theme="dark"] .btn.provider.apple{background:#fff;color:#000;border-color:#fff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn.provider.apple{background:#fff;color:#000;border-color:#fff}}
+.ordiv{display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:12.5px} .ordiv::before,.ordiv::after{content:'';flex:1;height:1px;background:var(--line)}
+.acts button.approve{background:var(--grad);color:#fff;border-radius:8px;padding:6px 12px;font-weight:600;opacity:1}
 </style>
 </head>
 <body>

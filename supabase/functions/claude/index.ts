@@ -135,12 +135,9 @@ Deno.serve(async (req) => {
   if (images.some((i) => !IMAGE_TYPES.includes(i.media_type) || i.data.length > MAX_IMAGE_B64)) return fail(400, "image_rejected");
   if (documents.some((d) => d.media_type !== "application/pdf" || d.data.length > MAX_PDF_B64)) return fail(400, "image_rejected");
 
-  // Invite-only: if the invites table has anyone in it, only they can use Claude.
-  const { count: invited } = await admin.from("invites").select("email", { count: "exact", head: true });
-  if (invited) {
-    const { data: me } = await admin.from("invites").select("email").eq("email", (user.email ?? "").toLowerCase()).maybeSingle();
-    if (!me) return fail(403, "not_invited");
-  }
+  // Only people the owner has approved (see members in schema.sql).
+  const { data: member } = await admin.from("members").select("status").eq("user_id", user.id).maybeSingle();
+  if (member?.status !== "approved") return fail(403, "not_approved");
 
   // Daily cap.
   const { data: used, error: capErr } = await admin.rpc("bump_ai_usage", { p_user: user.id, p_day: day });
