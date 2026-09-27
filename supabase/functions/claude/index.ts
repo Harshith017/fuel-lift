@@ -95,6 +95,26 @@ async function callGemini(model: string, maxTokens: number, prompt: string,
   return { refused: false, text, model: data.modelVersion ?? model };
 }
 
+// Google's free tier is often "experiencing high demand" (503) or briefly
+// rate-limited. Retry the preferred model once, then try the other one.
+const BUSY = new Set([429, 500, 503, 504]);
+async function callGeminiWithFallback(models: string[], maxTokens: number, prompt: string,
+  images: { media_type: string; data: string }[], documents: { media_type: string; data: string }[]) {
+  const tries = [models[0], models[0], ...models.slice(1)].filter((m, i, a) => m && (i < 2 || a.indexOf(m) === i));
+  let last: unknown;
+  for (let i = 0; i < tries.length; i++) {
+    try { return await callGemini(tries[i], maxTokens, prompt, images, documents); }
+    catch (e) {
+      last = e;
+      const status = (e as { status?: number })?.status;
+      if (status && !BUSY.has(status)) throw e;
+      console.error("gemini busy", tries[i], status);
+      if (i < tries.length - 1) await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return fail(405, "method_not_allowed");
@@ -154,7 +174,7 @@ Deno.serve(async (req) => {
 
   if (PROVIDER === "gemini") {
     try {
-      const out = await callGemini(tier.smart ? GEMINI_SMART : GEMINI_QUICK, tier.maxTokens, prompt, images, documents);
+      const out = await callGeminiWithFallback(tier.smart ? [GEMINI_SMART, GEMINI_QUICK] : [GEMINI_QUICK, GEMINI_SMART], tier.maxTokens, prompt, images, documents);
       if (out.refused) { await refund(); return fail(422, "refused", { usage }); }
       if (!out.text.trim()) return fail(502, "empty_completion", { usage });
       let json: unknown;
@@ -165,9 +185,10 @@ Deno.serve(async (req) => {
       const { status, reason } = (e ?? {}) as { status?: number; reason?: string };
       console.error("gemini", status, reason);
       if (status === 429) return fail(429, "rate_limited", { usage });
+      if (status && BUSY.has(status)) return fail(503, "busy", { usage, detail: String(reason ?? "").slice(0, 200) });
       if (status === 401 || status === 403 || status === 404 || /API_KEY/.test(reason ?? "")) return fail(500, "server_config");
       if (status === 400) return fail(400, images.length || documents.length ? "image_rejected" : "bad_request");
-      return fail(503, "unavailable");
+      return fail(503, "unavailable", { detail: `${status ?? ""} ${String(reason ?? (e instanceof Error ? e.message : e)).slice(0, 200)}` });
     }
   }
 

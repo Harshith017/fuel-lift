@@ -437,6 +437,7 @@ const AI_ERR = {
   not_approved:'Your account is waiting for the owner’s approval.',
   server_config:'The app’s AI key isn’t set up correctly. The owner needs to check the GEMINI_API_KEY or ANTHROPIC_API_KEY secret.',
   unavailable:'Couldn’t reach AI. Your entry is still here; try again.',
+  busy:'The AI is busy right now (Google’s free service is overloaded). Your entry is still here; try again in a minute.',
   offline:'You’re offline. Food-table items still log; try AI again when you’re back online.',
   rate_limited:'AI is busy right now. Try again in a minute.',
   image_rejected:'That file couldn’t be read. Try a JPEG, PNG or PDF under 20 MB.',
