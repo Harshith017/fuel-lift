@@ -66,6 +66,15 @@ Open the link on your phone, then Share → **Add to Home Screen**.
 - **Invite-only Claude**: add friends' emails in the `invites` table (Table Editor). While the table is empty, anyone who signs up can use Claude up to the daily cap. Once it has rows, only those emails can.
 - **1,014 Indian recipes**: download `INDB.xlsx` from the INDB project, then Profile → *Import 1,014 Indian recipes*. They then log instantly without Claude.
 
+## Security
+
+- **Data**: every table has row-level security. People only see their own logs; until approved they see nothing. The weekly leaderboard shows name, workouts and protein only, to approved members, and anyone can opt out in Settings.
+- **Keys**: `config.js` holds only the public anon key, which is safe to publish (the database rules decide what it can do). The service key and AI keys live only in Supabase secrets. Never commit them.
+- **The page**: a content security policy allows scripts only from this site and two pinned CDNs, and every CDN library is checked against its hash, so a tampered copy is refused. The page refuses to run inside another site's frame.
+- **Passwords**: at least 8 characters; new passwords are checked against known data breaches (only the first 5 characters of the password's hash leave the phone). Supabase's own server-side breach check needs the Pro plan.
+- **Face ID**: passkeys are verified on the server, approval is re-checked at each sign-in, and sign-in challenges are single-use, expire after 5 minutes and are capped.
+- **Public repository**: the code being public is fine; nothing secret is in it or its history. GitHub Pages on a private repository needs a paid GitHub plan.
+
 ## What it costs
 
 Hosting and Supabase are free at friend-group scale. Claude is pay-as-you-go:

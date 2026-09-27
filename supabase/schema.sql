@@ -27,7 +27,7 @@ create policy "delete own docs" on public.docs for delete using (auth.uid() = us
 
 -- Keep updated_at honest (the page's clock can be wrong).
 create or replace function public.touch_updated_at() returns trigger
-language plpgsql as $$ begin new.updated_at := now(); return new; end $$;
+language plpgsql set search_path = '' as $$ begin new.updated_at := now(); return new; end $$;
 drop trigger if exists docs_touch on public.docs;
 create trigger docs_touch before insert or update on public.docs
   for each row execute function public.touch_updated_at();
@@ -94,19 +94,26 @@ create table if not exists public.members (
 );
 alter table public.members enable row level security;
 
-create or replace function public.is_approved() returns boolean
-language sql stable security definer set search_path = public as $$
+-- Approval checks used by the security rules. They live in the "private"
+-- schema, which the web API doesn't expose, so they can't be called directly.
+create schema if not exists private;
+revoke all on schema private from public, anon;
+grant usage on schema private to authenticated;
+create or replace function private.is_approved() returns boolean
+language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.members where user_id = auth.uid() and status = 'approved');
 $$;
-create or replace function public.is_admin() returns boolean
-language sql stable security definer set search_path = public as $$
+create or replace function private.is_admin() returns boolean
+language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.members where user_id = auth.uid() and status = 'approved' and is_admin);
 $$;
+revoke all on function private.is_approved(), private.is_admin() from public, anon;
+grant execute on function private.is_approved(), private.is_admin() to authenticated;
 
 drop policy if exists "see own membership" on public.members;
 drop policy if exists "admins see everyone" on public.members;
 create policy "see own membership" on public.members for select using (auth.uid() = user_id);
-create policy "admins see everyone" on public.members for select using (public.is_admin());
+create policy "admins see everyone" on public.members for select using (private.is_admin());
 
 -- Every new account gets a row; emails already on the invites list are approved straight away.
 create or replace function public.handle_new_member() returns trigger
@@ -121,6 +128,7 @@ begin
   on conflict (user_id) do nothing;
   return new;
 end $$;
+revoke all on function public.handle_new_member() from public, anon, authenticated;  -- only the trigger runs it
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_member();
@@ -134,7 +142,7 @@ on conflict (user_id) do nothing;
 create or replace function public.set_member_status(p_user uuid, p_status text) returns void
 language plpgsql security definer set search_path = public as $$
 begin
-  if not public.is_admin() then raise exception 'not allowed'; end if;
+  if not private.is_admin() then raise exception 'not allowed'; end if;
   if p_user = auth.uid() then raise exception 'you cannot change your own access'; end if;
   if p_status not in ('approved','declined','pending') then raise exception 'bad status'; end if;
   update public.members set status = p_status, decided_at = now() where user_id = p_user;
@@ -147,10 +155,10 @@ drop policy if exists "read own docs"   on public.docs;
 drop policy if exists "insert own docs" on public.docs;
 drop policy if exists "update own docs" on public.docs;
 drop policy if exists "delete own docs" on public.docs;
-create policy "read own docs"   on public.docs for select using (auth.uid() = user_id and public.is_approved());
-create policy "insert own docs" on public.docs for insert with check (auth.uid() = user_id and public.is_approved());
-create policy "update own docs" on public.docs for update using (auth.uid() = user_id and public.is_approved()) with check (auth.uid() = user_id and public.is_approved());
-create policy "delete own docs" on public.docs for delete using (auth.uid() = user_id and public.is_approved());
+create policy "read own docs"   on public.docs for select using (auth.uid() = user_id and private.is_approved());
+create policy "insert own docs" on public.docs for insert with check (auth.uid() = user_id and private.is_approved());
+create policy "update own docs" on public.docs for update using (auth.uid() = user_id and private.is_approved()) with check (auth.uid() = user_id and private.is_approved());
+create policy "delete own docs" on public.docs for delete using (auth.uid() = user_id and private.is_approved());
 
 -- 6. Face ID / Touch ID sign-in (passkeys). Only the passkey server
 --    function reads or writes these tables (RLS on, no policies).
@@ -196,7 +204,30 @@ drop policy if exists "members read the board" on public.leaderboard;
 drop policy if exists "write own board row"   on public.leaderboard;
 drop policy if exists "update own board row"  on public.leaderboard;
 drop policy if exists "delete own board row"  on public.leaderboard;
-create policy "members read the board" on public.leaderboard for select using (public.is_approved());
-create policy "write own board row"   on public.leaderboard for insert with check (auth.uid() = user_id and public.is_approved());
-create policy "update own board row"  on public.leaderboard for update using (auth.uid() = user_id and public.is_approved()) with check (auth.uid() = user_id and public.is_approved());
+create policy "members read the board" on public.leaderboard for select using (private.is_approved());
+create policy "write own board row"   on public.leaderboard for insert with check (auth.uid() = user_id and private.is_approved());
+create policy "update own board row"  on public.leaderboard for update using (auth.uid() = user_id and private.is_approved()) with check (auth.uid() = user_id and private.is_approved());
 create policy "delete own board row"  on public.leaderboard for delete using (auth.uid() = user_id);
+
+-- 8. Hardening.
+-- Only the kinds of records the app writes.
+alter table public.docs drop constraint if exists docs_collection_known;
+alter table public.docs add constraint docs_collection_known
+  check (collection in ('days','profile','foods','reports','plans','reviews','foodlib'));
+-- Leaderboard numbers must be sensible (weeks start on Monday).
+alter table public.leaderboard drop constraint if exists leaderboard_sane;
+alter table public.leaderboard add constraint leaderboard_sane check (
+  extract(isodow from week) = 1 and workouts between 0 and 7 and logged_days between 0 and 7
+  and score between 0 and 100 and char_length(coalesce(name,'')) <= 40
+  and coalesce(protein_avg,0) between 0 and 1000 and coalesce(protein_target,0) between 0 and 1000);
+-- Old copies of the approval checks, from before they moved to "private".
+drop function if exists public.is_approved();
+drop function if exists public.is_admin();
+
+-- Supabase's own rls_auto_enable() event-trigger helper doesn't need to be
+-- callable over the API (event triggers run regardless of these grants).
+do $$ begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    revoke all on function public.rls_auto_enable() from public, anon, authenticated;
+  end if;
+end $$;

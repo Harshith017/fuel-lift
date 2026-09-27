@@ -115,6 +115,7 @@ Deno.serve(async (req) => {
     documents?: { media_type: string; data: string }[];
   };
   try { body = await req.json(); } catch { return fail(400, "bad_request"); }
+  if (!body || typeof body !== "object") return fail(400, "bad_request");
 
   // Today's date in the app's time zone. Decided here, never by the page, so
   // nobody can reset their cap by sending a different date.
@@ -130,10 +131,12 @@ Deno.serve(async (req) => {
   if (!tier) return fail(400, "bad_task");
   const prompt = String(body.prompt ?? "");
   if (!prompt || prompt.length > MAX_PROMPT) return fail(413, "prompt_too_large");
+  if ((body.images != null && !Array.isArray(body.images)) || (body.documents != null && !Array.isArray(body.documents))) return fail(400, "bad_request");
   const images = (body.images ?? []).slice(0, MAX_IMAGES);
   const documents = (body.documents ?? []).slice(0, 1);
-  if (images.some((i) => !IMAGE_TYPES.includes(i.media_type) || i.data.length > MAX_IMAGE_B64)) return fail(400, "image_rejected");
-  if (documents.some((d) => d.media_type !== "application/pdf" || d.data.length > MAX_PDF_B64)) return fail(400, "image_rejected");
+  const b64ok = (x: unknown, max: number) => typeof x === "string" && x.length > 0 && x.length <= max && /^[A-Za-z0-9+/=]+$/.test(x);
+  if (images.some((i) => !IMAGE_TYPES.includes(i?.media_type) || !b64ok(i?.data, MAX_IMAGE_B64))) return fail(400, "image_rejected");
+  if (documents.some((d) => d?.media_type !== "application/pdf" || !b64ok(d?.data, MAX_PDF_B64))) return fail(400, "image_rejected");
 
   // Only people the owner has approved (see members in schema.sql).
   const { data: member } = await admin.from("members").select("status").eq("user_id", user.id).maybeSingle();

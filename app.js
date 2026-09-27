@@ -480,7 +480,7 @@ async function importIndb(file){
   if (!file) { $('#indbInput').click(); return; }
   S.libBusy=true; S.libStatus='Reading the spreadsheet…'; render();
   try {
-    if (!window.XLSX) await new Promise((res,rej)=>{ const el=document.createElement('script'); el.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; el.onload=res; el.onerror=()=>rej({msg:'Couldn’t load the spreadsheet reader. Check your connection and try again.'}); document.head.appendChild(el); });
+    await loadXlsx();
     const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), {type:'array'}); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:null});
     const v = (r,k) => { const x = Number(r[k]); return Number.isFinite(x) && x>0 ? x : 0; };
     const out = [];
@@ -1840,10 +1840,23 @@ function autoStack(){
   if (p.stack.some(st=>!st.since)) saveProfile({...p, stack:p.stack.map(st=>({...st, since: st.since || since[st.id]}))});
 }
 
+/* ---------- Pinned libraries, loaded on demand ----------
+   Each is checked against its hash (subresource integrity), so a tampered
+   CDN copy is refused instead of run. */
+const LIBS = {
+  xlsx: { src:'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', integrity:'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw' },
+  webauthn: { src:'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@14.0.0/dist/bundle/index.umd.min.js', integrity:'sha384-06g944bCm8L/wG3i0Q8PdB8jccE4GdpHdNCa1tJY8eMqoP3GIHGJdL6B5lD5OMGD' },
+};
+function loadScript({ src, integrity }){
+  return new Promise((res, rej) => {
+    const el = document.createElement('script'); el.src = src; el.integrity = integrity; el.crossOrigin = 'anonymous';
+    el.onload = res; el.onerror = () => { el.remove(); rej(new Error('load failed')); }; document.head.appendChild(el);
+  });
+}
 /* ---------- Excel export ---------- */
 async function loadXlsx(){
   if (window.XLSX) return;
-  await new Promise((res,rej)=>{ const el=document.createElement('script'); el.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; el.onload=res; el.onerror=()=>rej({msg:'Couldn’t load the spreadsheet tool. Check your connection and try again.'}); document.head.appendChild(el); });
+  await loadScript(LIBS.xlsx).catch(()=>{ throw {msg:'Couldn’t load the spreadsheet tool. Check your connection and try again.'}; });
 }
 async function exportExcel(){
   S.xlsBusy=true; render();
@@ -2291,6 +2304,20 @@ function authCheck(email, password, minLen){
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return 'Enter your email address.';
   if (password.length<minLen) return minLen>1 ? `Choose a password of at least ${minLen} characters.` : 'Enter your password.';
 }
+// Has this password appeared in a known data breach? Only the first 5 characters
+// of its SHA-1 hash leave the device (k-anonymity), and if the check can't run
+// the password is allowed rather than blocking sign-up.
+async function pwnedPassword(password){
+  try {
+    const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password));
+    const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('').toUpperCase();
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 4000);
+    const res = await fetch('https://api.pwnedpasswords.com/range/' + hex.slice(0,5), { signal:ctl.signal, headers:{ 'Add-Padding':'true' }, referrerPolicy:'no-referrer' });
+    clearTimeout(t); if (!res.ok) return false;
+    return (await res.text()).split('\n').some(l => { const [suf, n] = l.trim().split(':'); return suf === hex.slice(5) && Number(n) > 0; });
+  } catch { return false; }
+}
+const PWNED_MSG = 'That password has shown up in a data breach, so it’s easy to guess. Choose a different one.';
 async function authPassword(){
   const { email, password } = authCreds(), bad = authCheck(email, password, 1);
   if (bad) { S.auth={...S.auth, email, msg:bad, err:true}; render(); return; }
@@ -2305,6 +2332,7 @@ async function authSignUp(){
   const { email, password } = authCreds(), bad = authCheck(email, password, 8);
   if (bad) { S.auth={...S.auth, email, msg:bad, err:true}; render(); return; }
   S.auth={step:'email', email, busy:true, msg:''}; render();
+  if (await pwnedPassword(password)) { S.auth={step:'email', email, busy:false, err:true, msg:PWNED_MSG}; render(); return; }
   const { data, error } = await SB.auth.signUp({ email, password, options:{ emailRedirectTo:redirectTo() } });
   if (error) S.auth={step:'email', email, busy:false, err:true, msg: /rate/i.test(error.message) ? 'Too many emails. Wait a while and try again.' : /password/i.test(error.message) ? error.message : 'Couldn’t create the account. Check the address and try again.'};
   else if (data.user && !data.user.identities?.length) S.auth={step:'email', email, busy:false, err:true, msg:'That email already has an account. Sign in, or use the email link and then set a password under Profile → Account.'};
@@ -2314,6 +2342,7 @@ async function authSignUp(){
 async function setPassword(){
   const password = $('#newPass')?.value||'';
   if (password.length<8) { toast('Choose a password of at least 8 characters.'); return; }
+  if (await pwnedPassword(password)) { toast(PWNED_MSG); return; }
   const { error } = await SB.auth.updateUser({ password });
   toast(error ? 'Couldn’t set the password: '+error.message : 'Password set. Use it to sign in on any device, including the home-screen app.');
   if (!error && $('#newPass')) $('#newPass').value='';
@@ -2328,7 +2357,7 @@ const bioName = () => /iPhone|iPad/.test(navigator.userAgent) ? 'Face ID' : /Mac
 const deviceName = () => { const u = navigator.userAgent; return /iPhone/.test(u)?'iPhone':/iPad/.test(u)?'iPad':/Android/.test(u)?'Android phone':/Macintosh/.test(u)?'Mac':/Windows/.test(u)?'Windows PC':'This device'; };
 async function webauthnLib(){
   if (window.SimpleWebAuthnBrowser) return window.SimpleWebAuthnBrowser;
-  await new Promise((res, rej) => { const el = document.createElement('script'); el.src = 'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@14/dist/bundle/index.umd.min.js'; el.onload = res; el.onerror = () => rej({code:'offline'}); document.head.appendChild(el); });
+  await loadScript(LIBS.webauthn).catch(() => { throw {code:'offline'}; });
   return window.SimpleWebAuthnBrowser;
 }
 async function passkeyCall(action, body = {}){

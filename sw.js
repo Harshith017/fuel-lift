@@ -1,7 +1,7 @@
 /* MaxxTempo service worker: the app opens offline after the first visit.
    Bump VERSION when shipping changes. */
-const VERSION = 'fuel-lift-v19';
-const SHELL = ['./', 'index.html', 'config.js', 'calc.js', 'foods.js', 'backend.js', 'app.js', 'manifest.json', 'icon-192.png', 'icon-180.png', 'icon-512.png'];
+const VERSION = 'fuel-lift-v20';
+const SHELL = ['./', 'index.html', 'boot.js', 'config.js', 'calc.js', 'foods.js', 'backend.js', 'app.js', 'manifest.json', 'icon-192.png', 'icon-180.png', 'icon-512.png'];
 const LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 
 self.addEventListener('install', e => {
@@ -29,7 +29,8 @@ self.addEventListener('fetch', e => {
     const hit = await cache.match(req);
     if (hit) return hit;
     const res = await fetch(req);
-    if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
+    // Opaque copies can't be integrity-checked, so only fonts are kept that way.
+    if (res && (res.ok || (res.type === 'opaque' && req.destination !== 'script'))) cache.put(req, res.clone());
     return res;
   }));
 });
