@@ -662,7 +662,9 @@ async function submitLog(){
       if (r.health) bits.push('Health data'+(r.health.steps?` (${n0(r.health.steps)} steps`:' (')+(r.health.sleep_min?`${r.health.steps?', ':''}${fmtSleep(r.health.sleep_min)} sleep`:'')+')');
       for (const a of r.activities) enqueueActivity(a, date);
       const how = !needAI ? ' From the built-in tables, no AI used.' : nLocal ? ` ${nLocal} from the built-in tables, the rest read by AI.` : aiFoods ? ' Saved to your food list, so next time it’s instant.' : r.exercises.length ? ' New exercises are remembered, so next time they’re instant.' : '';
-      setStatus(bits.length ? 'Logged ' + bits.join(', ') + '.' + how + (r.notes ? ' ' + r.notes : '') : (r.notes||''));
+      const newPrs = r.exercises.length ? [...prsOn(date).values()].filter(x => r.exercises.some(e => exKey(e.name)===exKey(x.name))) : [];
+      setStatus((newPrs.length ? `New personal record: ${newPrs.map(x=>`${x.name}, ${x.text}`).join('; ')}! ` : '') + (bits.length ? 'Logged ' + bits.join(', ') + '.' + how + (r.notes ? ' ' + r.notes : '') : (r.notes||'')));
+      if (date===localDate() && r.exercises.some(e => (e.sets||[]).length)) startRest();
       if ($('#logText')) $('#logText').value = ''; clearPhoto();
     }
   } catch (e) {
@@ -897,6 +899,16 @@ function staleSports(){
   const cutoff = addDays(localDate(), -90);
   return Object.entries(prof().sports||{}).filter(([k,v]) => v.updated && v.updated < cutoff && v.checked !== localDate().slice(0,7));
 }
+// Monthly: after two weeks of logs with no backup, or 30 days since the last one; "Later" waits a week.
+function backupDue(){
+  if (!S.profile || S.date!==localDate()) return false;
+  let later = 0; try { later = +localStorage.getItem('mt:backup-later')||0; } catch {}
+  if (Date.now() - later < 7*864e5) return false;
+  const last = prof().last_backup;
+  if (last) return last <= addDays(localDate(), -30);
+  const logged = [...S.days.values()].filter(d => (d.foods||[]).length || (d.exercises||[]).length).length;
+  return logged >= 14;
+}
 function todayBanners(){
   let h='';
   const waiting = S.isAdmin ? (S.members||[]).filter(x=>x.status==='pending').length : 0;
@@ -904,6 +916,7 @@ function todayBanners(){
   if (S.bioOK && S.passkeys && !S.passkeys.length && !later) h += `<div class="banner" style="margin-bottom:16px;border-left-color:var(--accent)"><b>Sign in with ${bioName()} next time.</b> No password needed after this. <button class="linkbtn" data-action="faceIdSetup" ${S.pkBusy?'disabled':''}>Turn it on</button><button class="linkbtn" data-action="faceIdLater" style="color:var(--ink-3)">Not now</button></div>`;
   if (waiting) h += `<div class="banner" style="margin-bottom:16px;border-left-color:var(--accent)">${waiting} ${waiting===1?'person is':'people are'} waiting for you to approve them. <button class="linkbtn" data-action="reviewPeople">Review</button></div>`;
   if (S.profile && !Object.keys(S.profile.sports||{}).length) h += `<div class="banner" style="margin-bottom:16px">Tell me which sports you play and how, so calories and recovery fit you. <button class="linkbtn" data-action="startSetup" data-step="sports">Set up my sports</button></div>`;
+  if (backupDue()) h += `<div class="banner" style="margin-bottom:16px">${prof().last_backup ? `Your last backup was on ${esc(fmtDate(prof().last_backup,{day:'numeric',month:'short'}))}.` : 'You haven’t downloaded a backup yet.'} The free database has no backups of its own, so keep a copy on your phone. <button class="linkbtn" data-action="backupNow">Download backup</button><button class="linkbtn" data-action="backupLater" style="color:var(--ink-3)">Later</button></div>`;
   for (const [k,v] of staleSports()) h += `<div class="banner" style="margin-bottom:16px">Your ${esc(v.name)} details are from ${esc(fmtDate(v.updated,{day:'numeric',month:'short',year:'numeric'}))}. Still how you play? <button class="linkbtn" data-action="updSport" data-key="${esc(k)}">Update</button><button class="linkbtn" data-action="stillRight" data-key="${esc(k)}">Still right</button></div>`;
   return h;
 }
@@ -1097,7 +1110,7 @@ function viewHealth(){
     </section>
   </div>
   <section class="panel"><div class="panel-head"><h2>All results</h2><button class="linkbtn" data-action="delReport" data-id="${sel.id}">Delete this report</button></div>
-    <div class="tablewrap"><table><thead><tr><th class="l">Test</th><th class="r">Result</th><th>Range</th><th>Status</th>${reps.length>1?'<th class="r">Previous</th>':''}</tr></thead><tbody>
+    <div class="tablewrap" tabindex="0"><table><thead><tr><th class="l">Test</th><th class="r">Result</th><th>Range</th><th>Status</th>${reps.length>1?'<th class="r">Previous</th>':''}</tr></thead><tbody>
     ${cats.map(c=>`<tr><td colspan="${reps.length>1?5:4}" class="l" style="font-weight:700;color:var(--ink-3);font-size:12px;text-transform:uppercase;letter-spacing:.07em">${esc(c)}</td></tr>`+sel.markers.filter(m=>m.category===c).map(m=>{
       const prev = reps.filter(r=>r.report_date<sel.report_date).map(r=>r.markers.find(x=>x.key===m.key)).find(Boolean);
       return `<tr class="click" data-action="pickMarker" data-key="${esc(m.key)}"><td class="l">${esc(m.name)}</td><td class="r"><b>${m.value!==null?esc(String(m.value)):esc(m.value_text||'—')}</b> <span class="muted small">${esc(m.unit)}</span></td><td class="muted small">${esc(m.ref)}</td><td>${statusPill(m.status)}</td>${reps.length>1?`<td class="r muted">${prev&&prev.value!==null?esc(String(prev.value)):'—'}</td>`:''}</tr>`; }).join('')).join('')}
@@ -1170,7 +1183,7 @@ function reviewPanel(){
       ${r.focus?`<div class="banner" style="border-left-color:var(--good)"><b>Focus next week:</b> ${esc(r.focus)}</div>`:''}
       ${r.going_well.length?`<h3>Going well</h3><ul class="tips">${r.going_well.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
       <div class="grid two">${[['Eating','eating'],['Training','training'],['Recovery','recovery']].map(([l,k])=>r[k].length?`<div><h3>${l}</h3><ul class="tips">${items(r[k])}</ul></div>`:'').join('')}</div>
-      ${r.sample_day.length?`<h3>A day that fits your targets</h3><div class="tablewrap"><table><tbody>${r.sample_day.map(m=>`<tr><td class="l"><b>${esc(m.meal)}</b></td><td class="l">${esc(m.foods)}</td><td class="r">${n0(m.kcal)} kcal</td><td class="r">${n0(m.protein)} g P</td></tr>`).join('')}
+      ${r.sample_day.length?`<h3>A day that fits your targets</h3><div class="tablewrap" tabindex="0"><table><tbody>${r.sample_day.map(m=>`<tr><td class="l"><b>${esc(m.meal)}</b></td><td class="l">${esc(m.foods)}</td><td class="r">${n0(m.kcal)} kcal</td><td class="r">${n0(m.protein)} g P</td></tr>`).join('')}
         <tr><td class="l"><b>Total</b></td><td></td><td class="r"><b>${n0(r.sample_day.reduce((s,m)=>s+m.kcal,0))}</b></td><td class="r"><b>${n0(r.sample_day.reduce((s,m)=>s+m.protein,0))} g</b></td></tr></tbody></table></div>`:''}`
       :'<div class="muted small">Looks at your food, nutrient gaps, sleep, training load, weight trend and any blood-test flags, then tells you what to change next week.</div>'}
   </section>`;
@@ -1396,7 +1409,7 @@ function planCard(compact){
     if (compact) body += plan.exercises.length ? `<div class="small muted">${esc(plan.exercises.map(e=>e.name).join(' · '))}</div><button class="linkbtn" data-action="goto" data-view="gym" style="align-self:flex-start;padding-left:0">See the full session in Train</button>` : '';
     else {
       if (plan.warmup) body += `<div class="small"><b>Warm-up:</b> ${esc(plan.warmup)}</div>`;
-      body += `<div class="tablewrap"><table class="plantable"><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th><span class="sr">Edit</span></th></tr></thead><tbody>
+      body += `<div class="tablewrap" tabindex="0"><table class="plantable"><thead><tr><th class="l">Exercise</th><th class="r">Sets × reps</th><th class="l">Weight</th><th><span class="sr">Edit</span></th></tr></thead><tbody>
         ${plan.exercises.map((e,i)=>`<tr class="exrow1"><td class="l"><b>${esc(e.name)}</b>${e.edited?' <span class="tag">edited</span>':''}<div class="muted small">${[e.rest?`rest ${esc(e.rest)}`:'', e.note?esc(e.note):''].filter(Boolean).join(' · ')}</div></td><td class="r">${e.sets?e.sets+' × ':''}${esc(e.reps)}</td><td class="l">${esc(e.weight)}</td><td class="r"><button class="editbtn" data-action="planEx" data-i="${i}" aria-label="Edit ${esc(e.name)}">✎</button></td></tr><tr class="howrow"><td colspan="4">${howtoFold(e.name)}</td></tr>`).join('')}</tbody></table></div>
         <div class="row"><button class="btn ghost sm" data-action="planEx" data-i="-1">+ Add exercise</button><span class="muted small">Your edits become the starting point for future plans.</span></div>`;
       if (plan.finisher) body += `<div class="small"><b>Finish with:</b> ${esc(plan.finisher)}</div>`;
@@ -1412,6 +1425,44 @@ function planCard(compact){
 function latestWeightDate(){ let d=''; for (const [k,v] of S.days) if (v.weight_kg && k>d) d=k; return d; }
 function setStatus(msg, err=false){ S.status=msg; S.statusErr=err; const el=$('#logStatus'); if (el){ el.textContent=msg; el.classList.toggle('err',err);} }
 function clearPhoto(){ if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photo=null; S.photoUrl=null; }
+
+/* ---------- rest timer (after logging sets) ---------- */
+let restT = null;
+const restOn = () => prof().rest_timer !== false;
+function startRest(sec){
+  if (!restOn()) return;
+  sec = sec || Number(prof().rest_default) || 90;
+  S.rest = {end: Date.now() + sec*1000, total: sec}; tickRest();
+}
+function stopRest(){ S.rest = null; clearInterval(restT); restT = null; const el = $('#restbar'); if (el) el.hidden = true; document.body.classList.remove('resting'); }
+function tickRest(){
+  const el = $('#restbar'); if (!el || !S.rest) return;
+  clearInterval(restT);
+  const draw = () => {
+    if (!S.rest) return;
+    const left = Math.max(0, Math.round((S.rest.end - Date.now())/1000));
+    el.hidden = false; document.body.classList.add('resting');
+    el.innerHTML = left > 0
+      ? `<span class="rt" aria-live="off">Rest <b>${Math.floor(left/60)}:${pad(left%60)}</b></span><span class="rtbar"><i style="width:${(1-left/S.rest.total)*100}%"></i></span>${[60,90,120].map(v=>`<button data-action="restSet" data-s="${v}" aria-label="Rest ${v} seconds">${v}s</button>`).join('')}<button data-action="restStop" aria-label="Stop the rest timer">✕</button>`
+      : `<span class="rt" role="status"><b>Rest over</b>: next set!</span><span class="spacer"></span><button data-action="restStop">OK</button>`;
+    if (left <= 0) { clearInterval(restT); restT = null; restDone(); }
+  };
+  draw(); restT = setInterval(draw, 500);
+}
+function restDone(){
+  if (navigator.vibrate) navigator.vibrate([250,120,250]);
+  try { const ctx = new (window.AudioContext||window.webkitAudioContext)(); const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 880; g.gain.setValueAtTime(0.15, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.6); } catch {}
+  setTimeout(() => { if (S.rest && Date.now() >= S.rest.end) stopRest(); }, 15000);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState==='visible' && S.rest) tickRest(); });
+function workoutFold(){
+  const p = prof();
+  return `<label class="check"><input type="checkbox" data-action="restToggle" ${restOn()?'checked':''}> Show a rest timer after I log sets</label>
+    <label class="field">Default rest<select data-action="restDefault">${[45,60,90,120,150,180].map(v=>`<option value="${v}" ${Number(p.rest_default||90)===v?'selected':''}>${v<60?v+' s':`${Math.floor(v/60)}:${pad(v%60)} min`}</option>`).join('')}</select></label>
+    <div class="muted small">It counts down at the bottom of the screen and buzzes (and beeps) when rest is over. Tap 60s / 90s / 120s to change it for that set.</div>`;
+}
 
 /* ---------- UI bits ---------- */
 let toastTimer;
@@ -1522,7 +1573,9 @@ function sportList(day){
 function exerciseList(day){
   const ex = day.exercises||[];
   if (!ex.length) return `<div class="empty">No training logged. Try “squat 80x5, 85x5, 90x3”.</div>`;
-  return ex.map(e=>`<div class="item"><div><div class="nm">${esc(e.name)} <span class="tag">${esc(e.muscle_group)}</span></div>
+  const prs = prsOn(day.date); const seenPr = new Set();
+  const prTag = e => { const k = exKey(e.name), pr = prs.get(k); if (!pr || seenPr.has(k)) return ''; seenPr.add(k); return ` <span class="prbadge" title="${esc('New personal record: '+pr.text)}">PR</span>`; };
+  return ex.map(e=>`<div class="item"><div><div class="nm">${esc(e.name)}${prTag(e)} <span class="tag">${esc(e.muscle_group)}</span></div>
     <div class="sub">${(e.sets||[]).length ? e.sets.map(s=>s.weight>0?`${n1(s.weight)} × ${s.reps}`:`${s.reps} reps`).join(' · ') : ''}${e.duration_min?`${(e.sets||[]).length?' · ':''}${n0(e.duration_min)} min`:''}</div></div>
     <div class="kc">${n0(e.kcal)}<span class="muted small"> kcal</span></div>
     <div class="acts"><button data-action="editEx" data-id="${e.id}" aria-label="Edit ${esc(e.name)}">Edit</button><button data-action="delEx" data-id="${e.id}" aria-label="Delete ${esc(e.name)}">✕</button></div>
@@ -1533,7 +1586,7 @@ function sportSummary(a,b,label){
   if (!names.length) return `<section class="panel" aria-label="Sport"><div class="panel-head"><h2>Sport</h2></div><div class="empty">No badminton or cricket logged in this period or ${esc(label)}. Log a session above, e.g. “badminton singles 45 min”.</div></section>`;
   const hm = m => m>=60 ? `${Math.floor(m/60)}h ${pad(Math.round(m%60))}m` : `${Math.round(m)} min`;
   return `<section class="panel" aria-label="Sport"><div class="panel-head"><h2>Sport</h2><span class="muted small">compared with ${esc(label)}</span></div>
-    <div class="tablewrap"><table><thead><tr><th class="l">Sport</th><th class="r">Sessions</th><th class="r">Time</th><th class="r">kcal</th><th class="r">Balls bowled</th><th class="r">Balls faced</th></tr></thead><tbody>
+    <div class="tablewrap" tabindex="0"><table><thead><tr><th class="l">Sport</th><th class="r">Sessions</th><th class="r">Time</th><th class="r">kcal</th><th class="r">Balls bowled</th><th class="r">Balls faced</th></tr></thead><tbody>
     ${names.map(n => { const c=a.sp[n]||{sessions:0,minutes:0,kcal:0,bowled:0,faced:0}, p=b.sp[n]||{sessions:0,minutes:0,kcal:0,bowled:0,faced:0};
       const cell = (cv,pv,f) => `${f(cv)}<br>${delta(cv,pv)}`;
       return `<tr><td class="l"><b>${esc(n)}</b></td><td class="r">${cell(c.sessions,p.sessions,n0)}</td><td class="r">${cell(c.minutes,p.minutes,hm)}</td><td class="r">${cell(c.kcal,p.kcal,n0)}</td>
@@ -1685,6 +1738,26 @@ function exerciseRows(){
     return {e, last, bw:last.bodyweight, allBest:Math.max(...e.sessions.map(s=>s.best)), base};
   }).sort((x,y)=> y.last.date.localeCompare(x.last.date) || x.e.name.localeCompare(y.e.name));
 }
+/* Personal records: a session that beats every earlier one for that exercise on
+   heaviest weight, estimated 1-rep max, or (bodyweight moves) most reps in a set.
+   The first time an exercise is logged doesn't count. */
+function prsOn(date){
+  const out = new Map();
+  for (const [k,e] of buildSessions()) {
+    const i = e.sessions.findIndex(x=>x.date===date); if (i<=0) continue;
+    const s = e.sessions[i], before = e.sessions.slice(0,i);
+    if (s.bodyweight) { const m = Math.max(...before.map(x=>x.best)); if (s.best > m) out.set(k, {name:e.name, text:`${n0(s.best)} reps (was ${n0(m)})`}); continue; }
+    const topB = Math.max(...before.map(x=>x.top)), bestB = Math.max(...before.map(x=>x.best));
+    if (s.top > topB) out.set(k, {name:e.name, text:`${n1(s.top)} kg heaviest (was ${n1(topB)})`});
+    else if (s.best > bestB + 0.05) out.set(k, {name:e.name, text:`est. 1RM ${n1(s.best)} kg (was ${n1(bestB)})`});
+  }
+  return out;
+}
+function recentPrs(days=30){
+  const since = addDays(localDate(), -days), out = [];
+  for (const [date, d] of S.days) if (date >= since && (d.exercises||[]).length) for (const [k,v] of prsOn(date)) out.push({date, ...v});
+  return out.sort((a,b)=>b.date.localeCompare(a.date));
+}
 function growthDash(rows){
   if (!rows.length) return `<section class="panel" aria-label="Gym progress"><div class="panel-head"><h2>Gym progress</h2></div>
     <div class="empty">Log a workout on Today, like “bench 60kg 3x8”. Each exercise then shows here with how much stronger you’re getting.</div></section>`;
@@ -1702,6 +1775,7 @@ function growthDash(rows){
         <span class="delta ${ch===null?'flat':ch>0.5?'up':ch<-0.5?'down':'flat'}">${ch===null?'first session':`${ch>0?'+':''}${n1(ch)}% ${r.base.date<=addDays(r.last.date,-28)?'vs 4 wks ago':`since ${esc(fmtDate(r.base.date,{day:'numeric',month:'short'}))}`}`}</span>
         ${spark(r.e.sessions.slice(-10).map(s=>s.best), 'var(--protein)')}</button>`; }).join('')}</div>
     ${rows.length>6?`<button class="linkbtn" data-action="allEx" style="align-self:flex-start;padding-left:0">${S.allEx?'Show fewer':`Show all ${rows.length} exercises`}</button>`:''}
+    ${(()=>{ const pr = recentPrs(30); return pr.length ? `<div><h3>Personal records, last 30 days</h3>${pr.slice(0,8).map(x=>`<div class="item"><div><div class="nm"><span class="prbadge">PR</span> ${esc(x.name)}</div><div class="sub">${esc(x.text)}</div></div><span class="muted small">${esc(fmtDate(x.date,{day:'numeric',month:'short'}))}</span><span></span></div>`).join('')}</div>` : ''; })()}
     <div class="muted small">Tap an exercise for its full chart. Est. 1RM = weight × (1 + reps ÷ 30), so sets with different reps compare fairly.</div>
   </section>`;
 }
@@ -1805,7 +1879,15 @@ const loadUsda = () => usdaP ||= fetch(`data/usda.json?v=${DATA_VER}`).then(r =>
 function usdaToFood(r){
   const [name, cat, units, kcal, protein, carbs, fat, fiber, sugar, ...m] = r;
   const micros = {}; FOOD_MICRO_ORDER.forEach((k,i)=>micros[k]=m[i]||0);
-  return {name, aliases:[], units:units||{}, per:{kcal,protein,carbs,fat,fiber,sugar,micros}, alcohol:m[14]||0, cat, src:'usda'};
+  return {name:usdaName(name), aliases:[name], units:units||{}, per:{kcal,protein,carbs,fat,fiber,sugar,micros}, alcohol:m[14]||0, cat, src:'usda'};
+}
+// USDA names lead with a group ("Nuts, almonds, blanched"); put the food first: "Almonds, blanched (nuts)".
+const USDA_GROUPS = new Set(['nuts','seeds','cereals','spices','oil','candies','beverages','snacks','soup','sauce','fast foods','restaurant','babyfood','cereals ready-to-eat','fish','crustaceans','mollusks','vegetables','fruit']);
+function usdaName(n){
+  const seg = String(n).split(', ');
+  let out = seg.length > 1 && USDA_GROUPS.has(seg[0].toLowerCase()) ? `${seg.slice(1).join(', ')} (${seg[0].toLowerCase()})` : seg.join(', ');
+  out = out.replace(/\b[A-Z]{3,}(?:'[A-Z]+)?\b/g, w => w[0] + w.slice(1).toLowerCase());   // "ALMOND JOY" → "Almond Joy"
+  return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
 /* ---------- food search (my foods, built-in, INDB, USDA) and portions ---------- */
@@ -1820,8 +1902,18 @@ async function searchFoods(q, limit=40){
   for (const f of FOODS) if (hit(f.name, f.aliases)) add({...f, src:'builtin'});
   for (const f of S.libFoods||[]) if (hit(f.name, f.aliases)) add(f);
   for (const f of await loadUsda()) if (hit(f.name)) add(f);
-  const rank = {mine:0, builtin:1, indb:2, usda:3};
-  return out.sort((a,b) => rank[a.src]-rank[b.src] || a.name.length-b.name.length).slice(0, limit);
+  // Relevance: exact names and names that start with what was typed first; oils, sweets and
+  // baby foods only when asked for; then your own foods, the built-in table, INDB, USDA.
+  const rank = {mine:0, builtin:1, indb:2, usda:3}, qs = new Set(qw);
+  const score = f => { const n = normFood(f.name), ws = words(f.name); let x = rank[f.src]*6 + n.length/25;
+    const qj = qw.join(' ');
+    if (n === qj || words(f.name).join(' ') === qj) x -= 100;
+    else if ((f.aliases||[]).some(a => words(a).join(' ') === qj)) x -= 90;
+    if (ws[0] === qw[0]) x -= 20; else if (ws.slice(0,2).includes(qw[0])) x -= 8;
+    for (const [re, pen] of [[/\boil\b/,40],[/\bcand(y|ies)\b/,40],[/\bbabyfood|infant\b/,60],[/\bflour\b/,12],[/\bbran\b/,12],[/\bfast food|restaurant\b/,10],[/\bbeverage\b/,8]])
+      if (re.test(n) && !qw.some(w => re.test(w))) x += pen;
+    return x; };
+  return out.map(f => [score(f), f]).sort((a,b) => a[0]-b[0]).map(x => x[1]).slice(0, limit);
 }
 const SRC_LABEL = {mine:'my food', builtin:'built in', indb:'INDB', usda:'USDA', off:'Open Food Facts'};
 function openFoodSearch(){
@@ -1985,7 +2077,7 @@ function viewTrends(){
   const ok = x => x==='at' || x==='plus';
   const hits = checks.reduce((s,[,f])=>s+rows.filter(r=>ok(f(r))).length,0), tries = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)!==null).length,0);
   const mark = x => x===null ? '<span class="muted">·</span>' : `<span class="st st-${x}">${x==='under'?'↓':x==='over'?'↑':'✓'}</span>`;
-  const targetsHtml = `<div class="tablewrap"><table class="hits"><thead><tr><th class="l"></th>${rows.map(r=>`<th>${esc(fmtDate(r.date,{weekday:'narrow'}))}</th>`).join('')}<th class="r">Hit</th></tr></thead><tbody>
+  const targetsHtml = `<div class="tablewrap" tabindex="0"><table class="hits"><thead><tr><th class="l"></th>${rows.map(r=>`<th>${esc(fmtDate(r.date,{weekday:'narrow'}))}</th>`).join('')}<th class="r">Hit</th></tr></thead><tbody>
     ${checks.map(([l,f])=>{ const res=rows.map(f); return `<tr><td class="l">${l}</td>${res.map(x=>`<td>${mark(x)}</td>`).join('')}<td class="r">${res.filter(ok).length}/${res.filter(x=>x!==null).length}</td></tr>`; }).join('')}
     </tbody></table></div><div class="muted small"><span class="st-at">✓</span> on target (within 10%) · <span class="st-plus">✓</span> over, and that’s fine · <span class="st-under">↓</span> below · <span class="st-over">↑</span> over · dot = not logged.</div>`;
   const actDays = rows.slice().reverse().filter(r=>r.d&&((r.d.sports||[]).length||(r.d.exercises||[]).length));
@@ -2135,6 +2227,7 @@ function viewProfile(){
       ${fold('s-profile', 'My details', `${esc(p.sex)} · ${n1(who(localDate()).kg)} kg · ${esc((GOALS[p.goal]||{}).label||'')}`, profileForm())}
       ${fold('s-data', 'Download my data', 'Excel', dataFold())}
       ${fold('s-connect', 'Watch &amp; health apps', p.watch_workouts?'watch on':'', connectFold())}
+      ${fold('s-workout', 'Workout', restOn()?`rest timer ${Number(p.rest_default||90)} s`:'rest timer off', workoutFold())}
       ${fold('s-sources', 'Data sources', 'free &amp; open', sourcesHtml())}
       ${S.isAdmin ? fold('s-people', 'People &amp; approvals', (()=>{ const n=(S.members||[]).filter(x=>x.status==='pending').length; return n?`${n} waiting`:`${(S.members||[]).filter(x=>x.status==='approved').length} approved`; })(), peopleFold()) : ''}
       ${fold('s-sports', 'Sports &amp; food list', `${Object.keys(p.sports||{}).length} sport${Object.keys(p.sports||{}).length===1?'':'s'}`, `<h3>Sports you play</h3>${sportsProfileHtml()}<h3>Your food list</h3>${foodListHtml()}`)}
@@ -2443,6 +2536,13 @@ document.addEventListener('click', ev => {
     case 'faceIdSignIn': authFaceId(); break;
     case 'faceIdSetup': setupFaceId(); break;
     case 'howto': openHowto(b.dataset.name||''); break;
+    case 'restSet': startRest(+b.dataset.s); break;
+    case 'restStop': stopRest(); break;
+    case 'tempPw': tempPassword(b.dataset.id, b.dataset.name||'this member'); break;
+    case 'mustChangeSave': mustChangeSave(); break;
+    case 'forgotPw': S.auth={...S.auth, err:false, msg:'This app doesn’t send reset emails to members. Ask the owner to set a temporary password for you (they tap Password next to your name in People & approvals). Sign in with it and you’ll choose a new one. If you turned on Face ID or fingerprint, you can use that instead.'}; render(); break;
+    case 'backupNow': exportData(); break;
+    case 'backupLater': try { localStorage.setItem('mt:backup-later', String(Date.now())); } catch {} render(); break;
     case 'foodSearch': openFoodSearch(); break;
     case 'scan': openScanner(); break;
     case 'hsCreate': hsCreate(); break;
@@ -2467,6 +2567,8 @@ document.addEventListener('change', ev => {
   if (el.dataset && el.dataset.action==='dayComplete') { const on = el.checked; writeDay(S.date, d => { if (on) delete d.incomplete; else d.incomplete = true; }); }
   if (el.dataset && el.dataset.action==='stackAuto') saveProfile({...prof(), stack_auto:el.checked});
   if (el.dataset && el.dataset.action==='watchToggle') saveProfile({...prof(), watch_workouts:el.checked});
+  if (el.dataset && el.dataset.action==='restToggle') { saveProfile({...prof(), rest_timer:el.checked}); if (!el.checked) stopRest(); }
+  if (el.dataset && el.dataset.action==='restDefault') saveProfile({...prof(), rest_default:+el.value});
   if (el.dataset && el.dataset.action==='boardToggle') { boardLast = ''; saveProfile({...prof(), leaderboard:el.checked}); }
 });
 document.addEventListener('toggle', ev => { const k = ev.target.dataset && ev.target.dataset.fold; if (!k) return;
@@ -2556,6 +2658,7 @@ function maintenancePanel(){
     <div class="muted small">Still needed: ${esc(ad.need.join(', '))}.</div></section>`;
 }
 function exportData(){
+  saveProfile({...prof(), last_backup:localDate()});
   const blob = new Blob([JSON.stringify({app:'fuel-lift', v:1, exported:new Date().toISOString(), docs:S.db.dump()}, null, 1)], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `maxxtempo-backup-${localDate()}.json`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
@@ -2588,6 +2691,11 @@ function waitingView(){
 }
 function authView(){
   if (S.pendingUser) return waitingView();
+  if (S.mustChange) return `<section class="panel auth" aria-label="Choose a new password"><h2>Choose a new password</h2>
+    <p class="muted">You signed in with a temporary password from the owner. Pick your own now; the temporary one stops working.</p>
+    <label class="field full">New password<input id="mcPass" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters"></label>
+    <div class="row"><span class="spacer"></span><button class="btn" data-action="mustChangeSave" ${S.mcBusy?'disabled':''}>${S.mcBusy?'Saving…':'Save and continue'}</button></div>
+    ${S.mcMsg?`<div class="status err">${esc(S.mcMsg)}</div>`:''}</section>`;
   const a = S.auth, cfgOk = window.FL_CONFIG && /^https:\/\//.test(FL_CONFIG.SUPABASE_URL||'') && FL_CONFIG.SUPABASE_ANON_KEY && !/YOUR_/.test(FL_CONFIG.SUPABASE_ANON_KEY);
   if (!cfgOk) return `<section class="panel setup"><h2>Almost there</h2><p>This copy of MaxxTempo isn’t connected to a database yet. Put your Supabase project URL and anon key in <b>config.js</b>, following SETUP.md.</p></section>`;
   if (a.step==='confirm') return `<section class="panel setup"><h2>Confirm your email</h2>
@@ -2607,6 +2715,7 @@ function authView(){
     <label class="field">Email<input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(a.email)}"></label>
     <label class="field">Password<input id="authPass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></label>
     <div class="row"><button class="btn ghost" data-action="authSignUp" ${a.busy?'disabled':''}>Create account</button><span class="spacer"></span><button class="btn" data-action="authPassword" ${a.busy?'disabled':''}>${a.busy?'Working…':'Sign in'}</button></div>
+    <button class="linkbtn" data-action="forgotPw" style="align-self:flex-start;padding-left:0">Forgot password?</button>
     <div class="row"><button class="btn ghost sm" data-action="authSend" ${a.busy?'disabled':''}>Email me a sign-in link instead</button></div>
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
 }
@@ -2614,12 +2723,22 @@ const redirectTo = () => location.origin + location.pathname;
 // Supabase's error, in plain words; the fallback when it's something else.
 function authErrMsg(error, fallback){
   const m = `${error?.code||''} ${error?.message||''}`;
-  if (/already.?(registered|exists)/i.test(m)) return 'That email already has an account. Tap Sign in with your password, or use Face ID.';
+  if (/already.?(registered|exists)/i.test(m)) return 'That email already has an account. Sign in with your password or Face ID. Never set a password (you used an email link)? Ask the owner for a temporary password.';
   if (/not.?authori[sz]ed|sending|smtp|confirmation email|magic link email/i.test(m)) return 'This app can’t send emails to new addresses yet. Create an account with a password instead, then ask the owner to approve you.';
   if (/rate|too many/i.test(m)) return 'Too many attempts. Wait a few minutes and try again.';
   if (/weak|pwned|password/i.test(m)) return error.message;
   if (/invalid.*email|email.*invalid/i.test(m)) return 'That email address doesn’t look right. Check it and try again.';
   return fallback + (error?.message ? ` (${error.message})` : '');
+}
+async function mustChangeSave(){
+  const password = $('#mcPass')?.value||'';
+  if (password.length<8) { S.mcMsg='Choose a password of at least 8 characters.'; render(); return; }
+  S.mcBusy=true; S.mcMsg=''; render();
+  if (await pwnedPassword(password)) { S.mcBusy=false; S.mcMsg=PWNED_MSG; render(); return; }
+  const { data, error } = await SB.auth.updateUser({ password, data:{ must_change_password:false } });
+  S.mcBusy=false;
+  if (error) { S.mcMsg = authErrMsg(error, 'Couldn’t save the password. Try again.'); render(); return; }
+  S.mustChange = null; toast('Password saved. Use it from now on.'); startFor(data.user);
 }
 async function authSend(){
   const email = ($('#authEmail')?.value||'').trim().toLowerCase();
@@ -2883,9 +3002,21 @@ function peopleFold(){
   const ms = S.members||[], pend = ms.filter(x=>x.status==='pending'), appr = ms.filter(x=>x.status==='approved'), dec = ms.filter(x=>x.status==='declined');
   const who = x => `<div><div class="nm">${esc(x.name||x.email||'Unknown')}${x.is_admin?' <span class="tag">you</span>':''}</div><div class="sub">${esc(x.email||'')}${x.provider?` · ${esc(x.provider==='email'?'email':x.provider[0].toUpperCase()+x.provider.slice(1))}`:''} · ${esc(fmtDate((x.decided_at||x.requested_at).slice(0,10),{day:'numeric',month:'short'}))}</div></div>`;
   return `${pend.length ? `<h3>Waiting for you</h3>${pend.map(x=>`<div class="item">${who(x)}<span></span><div class="acts"><button class="approve" data-action="memberSet" data-id="${x.user_id}" data-s="approved">Approve</button><button data-action="memberSet" data-id="${x.user_id}" data-s="declined">Decline</button></div></div>`).join('')}` : '<div class="muted small">Nobody is waiting. When someone signs in for the first time, they appear here for you to approve.</div>'}
-    <h3>Approved</h3>${appr.map(x=>`<div class="item">${who(x)}<span></span><div class="acts">${x.is_admin?'':`<button data-action="memberSet" data-id="${x.user_id}" data-s="declined">Remove</button>`}</div></div>`).join('')}
+    <h3>Approved</h3>${appr.map(x=>`<div class="item">${who(x)}<span></span><div class="acts">${x.is_admin?'':`<button data-action="tempPw" data-id="${x.user_id}" data-name="${esc(x.name||x.email||'')}" aria-label="Set a temporary password for ${esc(x.name||x.email||'')}">Password</button><button data-action="memberSet" data-id="${x.user_id}" data-s="declined">Remove</button>`}</div></div>`).join('')}
+    <div class="muted small">Forgot their password? Tap Password to make a temporary one, and give it to them privately. They choose their own next time they sign in.</div>
     ${dec.length?`<h3>Declined</h3>${dec.map(x=>`<div class="item">${who(x)}<span></span><div class="acts"><button data-action="memberSet" data-id="${x.user_id}" data-s="approved">Approve</button></div></div>`).join('')}`:''}
     <div class="row"><button class="btn ghost sm" data-action="reviewPeople">Refresh</button></div>`;
+}
+async function tempPassword(id, name){
+  if (!confirm(`Make a temporary password for ${name}? Their current password stops working.`)) return;
+  let r; try { r = await fnCall('members', 'temp-password', {user_id:id}); } catch (e) { toast(e.code==='offline' ? 'You’re offline. Try again when connected.' : 'Couldn’t set a temporary password. Try again.'); return; }
+  const d = $('#dlg');
+  d.innerHTML = `<div class="howto"><h2>Temporary password</h2>
+    <p class="small">For <b>${esc(name)}</b>${r.email?` (${esc(r.email)})`:''}. Share it privately (in person or a direct message). They sign in with it and then choose their own.</p>
+    <code class="keybox">${esc(r.password)}</code>
+    <div class="row"><button class="btn sm" id="tpCopy">Copy</button><span class="spacer"></span><button class="btn ghost" id="tpClose">Done</button></div>
+    <div class="muted small">It’s shown only now.</div></div>`;
+  d.showModal(); $('#tpClose').onclick = () => d.close(); $('#tpCopy').onclick = () => copyText(r.password, 'Password');
 }
 async function signOut(){
   if (S.db) await S.db.forget();
@@ -2915,6 +3046,7 @@ async function startFor(user){
   memberCheck = (async () => { const m = await memberStatus(user); memberCheck = null; return m; })();
   const m = await memberCheck;
   if (m.status!=='approved') { S.pendingUser = user; S.memberInfo = m; render(); return; }
+  if (user.user_metadata?.must_change_password) { S.mustChange = user; render(); return; }
   S.pendingUser = null; S.isAdmin = !!m.is_admin;
   S.user = user; S.dbState='connecting'; render();
   if (S.isAdmin) loadMembers();

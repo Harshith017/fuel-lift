@@ -40,7 +40,6 @@ const TASKS: Record<string, Tier> = {
   plan:       { smart: true, effort: "medium", maxTokens: 16000 }, // next session
   review:     { smart: true, effort: "medium", maxTokens: 16000 }, // weekly review
   report:     { smart: true, effort: "medium", maxTokens: 12000 }, // blood tests (kept under the function time limit)
-  ideas:      { smart: false, maxTokens: 4000 },                   // meal ideas
   questions:  { smart: false, maxTokens: 4000 },                   // sport profile questions
 };
 

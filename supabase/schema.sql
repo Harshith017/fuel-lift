@@ -20,10 +20,10 @@ drop policy if exists "read own docs"   on public.docs;
 drop policy if exists "insert own docs" on public.docs;
 drop policy if exists "update own docs" on public.docs;
 drop policy if exists "delete own docs" on public.docs;
-create policy "read own docs"   on public.docs for select using (auth.uid() = user_id);
-create policy "insert own docs" on public.docs for insert with check (auth.uid() = user_id);
-create policy "update own docs" on public.docs for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "delete own docs" on public.docs for delete using (auth.uid() = user_id);
+create policy "read own docs"   on public.docs for select to authenticated using ((select auth.uid()) = user_id);
+create policy "insert own docs" on public.docs for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "update own docs" on public.docs for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "delete own docs" on public.docs for delete to authenticated using ((select auth.uid()) = user_id);
 
 -- Keep updated_at honest (the page's clock can be wrong).
 create or replace function public.touch_updated_at() returns trigger
@@ -51,7 +51,7 @@ create table if not exists public.ai_usage (
 );
 alter table public.ai_usage enable row level security;
 drop policy if exists "read own usage" on public.ai_usage;
-create policy "read own usage" on public.ai_usage for select using (auth.uid() = user_id);
+create policy "read own usage" on public.ai_usage for select to authenticated using ((select auth.uid()) = user_id);
 
 -- Atomically adds one to today's count and returns the new count.
 create or replace function public.bump_ai_usage(p_user uuid, p_day date)
@@ -111,9 +111,9 @@ revoke all on function private.is_approved(), private.is_admin() from public, an
 grant execute on function private.is_approved(), private.is_admin() to authenticated;
 
 drop policy if exists "see own membership" on public.members;
+drop policy if exists "read membership" on public.members;
 drop policy if exists "admins see everyone" on public.members;
-create policy "see own membership" on public.members for select using (auth.uid() = user_id);
-create policy "admins see everyone" on public.members for select using (private.is_admin());
+create policy "read membership" on public.members for select to authenticated using ((select auth.uid()) = user_id or (select private.is_admin()));
 
 -- Every new account gets a row; emails already on the invites list are approved straight away.
 create or replace function public.handle_new_member() returns trigger
@@ -155,10 +155,10 @@ drop policy if exists "read own docs"   on public.docs;
 drop policy if exists "insert own docs" on public.docs;
 drop policy if exists "update own docs" on public.docs;
 drop policy if exists "delete own docs" on public.docs;
-create policy "read own docs"   on public.docs for select using (auth.uid() = user_id and private.is_approved());
-create policy "insert own docs" on public.docs for insert with check (auth.uid() = user_id and private.is_approved());
-create policy "update own docs" on public.docs for update using (auth.uid() = user_id and private.is_approved()) with check (auth.uid() = user_id and private.is_approved());
-create policy "delete own docs" on public.docs for delete using (auth.uid() = user_id and private.is_approved());
+create policy "read own docs"   on public.docs for select to authenticated using ((select auth.uid()) = user_id and (select private.is_approved()));
+create policy "insert own docs" on public.docs for insert to authenticated with check ((select auth.uid()) = user_id and (select private.is_approved()));
+create policy "update own docs" on public.docs for update to authenticated using ((select auth.uid()) = user_id and (select private.is_approved())) with check ((select auth.uid()) = user_id and (select private.is_approved()));
+create policy "delete own docs" on public.docs for delete to authenticated using ((select auth.uid()) = user_id and (select private.is_approved()));
 
 -- 6. Face ID / Touch ID sign-in (passkeys). Only the passkey server
 --    function reads or writes these tables (RLS on, no policies).
@@ -204,10 +204,10 @@ drop policy if exists "members read the board" on public.leaderboard;
 drop policy if exists "write own board row"   on public.leaderboard;
 drop policy if exists "update own board row"  on public.leaderboard;
 drop policy if exists "delete own board row"  on public.leaderboard;
-create policy "members read the board" on public.leaderboard for select using (private.is_approved());
-create policy "write own board row"   on public.leaderboard for insert with check (auth.uid() = user_id and private.is_approved());
-create policy "update own board row"  on public.leaderboard for update using (auth.uid() = user_id and private.is_approved()) with check (auth.uid() = user_id and private.is_approved());
-create policy "delete own board row"  on public.leaderboard for delete using (auth.uid() = user_id);
+create policy "members read the board" on public.leaderboard for select to authenticated using ((select private.is_approved()));
+create policy "write own board row"   on public.leaderboard for insert to authenticated with check ((select auth.uid()) = user_id and (select private.is_approved()));
+create policy "update own board row"  on public.leaderboard for update to authenticated using ((select auth.uid()) = user_id and (select private.is_approved())) with check ((select auth.uid()) = user_id and (select private.is_approved()));
+create policy "delete own board row"  on public.leaderboard for delete to authenticated using ((select auth.uid()) = user_id);
 
 -- 8. Hardening.
 -- Only the kinds of records the app writes.
@@ -256,3 +256,7 @@ create table if not exists public.health_attempts (
 );
 alter table public.health_attempts enable row level security;
 revoke all on public.health_attempts from anon, authenticated;
+
+-- 10. Speed: indexes for the foreign keys the advisor flagged.
+create index if not exists health_attempts_user on public.health_attempts (user_id);
+create index if not exists webauthn_challenges_user on public.webauthn_challenges (user_id);
