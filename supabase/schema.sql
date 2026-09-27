@@ -244,3 +244,15 @@ create table if not exists public.health_keys (
 );
 alter table public.health_keys enable row level security;
 revoke all on public.health_keys from anon, authenticated;
+-- Recent Shortcut attempts (outcome and field names only, no values), so a
+-- failing setup can be diagnosed. The function keeps the last 100.
+create table if not exists public.health_attempts (
+  id         bigint generated always as identity primary key,
+  at         timestamptz not null default now(),
+  user_id    uuid references auth.users (id) on delete cascade,
+  status     int not null,
+  code       text not null,
+  detail     text
+);
+alter table public.health_attempts enable row level security;
+revoke all on public.health_attempts from anon, authenticated;
