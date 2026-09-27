@@ -1673,6 +1673,7 @@ function viewTrends(){
   const trendsW = (()=>{ const pts=trendPoints().slice(-30); if (pts.length<2) return '<div class="muted small">Log your weight a few times (type “weight 72.4”) to see your trend.</div>';
     return lineChart({pts:pts.map(x=>({date:x.date, v:x.trend, raw:x.kg, tip:`trend ${n1(x.trend)} kg`})), unit:'kg', color:'var(--water)'}) + '<div class="muted small">The line is your smoothed weight trend, which your targets use. Daily weigh-ins swing 1–2 kg with water and food.</div>'; })();
   return `<div class="grid">
+    ${boardHtml()}
     <div class="panel-head"><h2>Last 7 days</h2><span class="muted small">${esc(fmtDate(rows[0].date,{day:'numeric',month:'short'}))} – ${esc(fmtDate(rows[6].date,{day:'numeric',month:'short'}))}</span></div>
     ${stateKey()}
     <div class="grid two">
@@ -1996,6 +1997,7 @@ function render(){
   const ta2 = $('#logText'); if (ta2) { ta2.value = draft; if (hadFocus) ta2.focus(); }
   document.querySelectorAll('.profForm').forEach(f => { f.onsubmit = onProfileSubmit; });
   autoStack();
+  if (S.rev !== S.boardRev) { S.boardRev = S.rev; publishBoard(); }
 }
 function onProfileSubmit(ev){
   ev.preventDefault();
@@ -2011,7 +2013,7 @@ function onProfileSubmit(ev){
     calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000};
   saveProfile(p); toast('Profile saved. Targets updated.');
 }
-function setView(v){ S.view=v; S.status=''; S.statusErr=false; render(); window.scrollTo({top:0}); }
+function setView(v){ S.view=v; S.status=''; S.statusErr=false; render(); window.scrollTo({top:0}); if (v==='trends') loadBoard(); }
 
 document.addEventListener('click', ev => {
   const b = ev.target.closest('[data-action],[data-view].tab'); if (!b) return;
@@ -2125,6 +2127,7 @@ document.addEventListener('change', ev => {
   if (el.dataset && el.dataset.action==='dayComplete') { const on = el.checked; writeDay(S.date, d => { if (on) delete d.incomplete; else d.incomplete = true; }); }
   if (el.dataset && el.dataset.action==='stackAuto') saveProfile({...prof(), stack_auto:el.checked});
   if (el.dataset && el.dataset.action==='watchToggle') saveProfile({...prof(), watch_workouts:el.checked});
+  if (el.dataset && el.dataset.action==='boardToggle') { boardLast = ''; saveProfile({...prof(), leaderboard:el.checked}); }
 });
 document.addEventListener('toggle', ev => { const k = ev.target.dataset && ev.target.dataset.fold; if (!k) return;
   if (ev.target.open) S.openFolds.add(k); else S.openFolds.delete(k);
@@ -2390,6 +2393,61 @@ function passkeyMenu(){
     <div class="row"><button class="btn sm" data-action="faceIdSetup" ${S.pkBusy?'disabled':''}>${S.pkBusy?'Waiting for '+b+'…':list&&list.length?`Add this device`:`Turn on ${b}`}</button></div>`;
 }
 
+/* ---------- weekly leaderboard (table "leaderboard" in schema.sql) ---------- */
+// Goal each week (Mon-Sun): 3+ days with gym or sport, and protein at your own target on average.
+const BOARD_WORKOUTS = 3;
+function weekMonday(date){ const d = new Date(date+'T12:00:00'); const dow = (d.getDay()+6)%7; return addDays(date, -dow); }
+function weekSummary(monday){
+  const today = localDate(); let workouts = 0, pSum = 0, tSum = 0, logged = 0;
+  for (let i=0; i<7; i++) { const date = addDays(monday, i); if (date > today) break; const d = S.days.get(date); if (!d) continue;
+    if ((d.exercises||[]).length || (d.sports||[]).length) workouts++;
+    if ((d.foods||[]).length) { logged++; pSum += dayTotals(d).protein; tSum += dayTargets(d).protein; } }
+  const pAvg = logged ? pSum/logged : 0, pTgt = logged ? tSum/logged : targets().protein;
+  const score = Math.round(50*Math.min(1, workouts/BOARD_WORKOUTS) + 50*Math.min(1, pTgt>0 ? pAvg/pTgt : 0));
+  return { workouts, protein_avg: Math.round(pAvg), protein_target: Math.round(pTgt), logged_days: logged, score };
+}
+const boardHit = r => r.workouts >= BOARD_WORKOUTS && r.logged_days > 0 && r.protein_avg >= r.protein_target;
+let boardT = null, boardLast = '';
+function publishBoard(){
+  if (!S.dbReady || !S.user || !SB) return;
+  clearTimeout(boardT);
+  boardT = setTimeout(async () => {
+    const monday = weekMonday(localDate());
+    if (prof().leaderboard === false) {
+      if (boardLast !== 'off') { boardLast = 'off'; await SB.from('leaderboard').delete().eq('user_id', S.user.id); loadBoard(); }
+      return;
+    }
+    const row = { user_id:S.user.id, week:monday, name:(prof().name||'').trim().slice(0,40) || (S.user.email||'').split('@')[0] || 'Member', ...weekSummary(monday) };
+    const key = JSON.stringify(row); if (key === boardLast) return; boardLast = key;
+    const { error } = await SB.from('leaderboard').upsert({ ...row, updated_at:new Date().toISOString() });
+    if (!error) loadBoard();
+  }, 2500);
+}
+async function loadBoard(){
+  if (!SB || !S.user) return;
+  const { data, error } = await SB.from('leaderboard').select('user_id,name,workouts,protein_avg,protein_target,logged_days,score,updated_at').eq('week', weekMonday(localDate()));
+  if (!error) { S.board = data || []; if (S.view==='trends') render(); }
+}
+function boardHtml(){
+  const monday = weekMonday(localDate()), me = S.user?.id, off = prof().leaderboard === false;
+  const rows = (S.board||[]).slice().sort((a,b)=> (boardHit(b)-boardHit(a)) || (b.score-a.score) || (b.workouts-a.workouts) || String(a.name).localeCompare(String(b.name)));
+  const line = r => `${r.workouts}/${BOARD_WORKOUTS} workouts · ${r.logged_days?`${n0(r.protein_avg)}/${n0(r.protein_target)} g protein`:'no food logged'}`;
+  const tag = r => boardHit(r) ? '<span class="spill" style="color:var(--st-at-t);background:color-mix(in srgb, var(--st-at) 15%, transparent)">✓ Target hit</span>' : '';
+  const top = rows.slice(0,3), rest = rows.slice(3);
+  const order = top.length===3 ? [top[1], top[0], top[2]] : top;             // podium: 2nd, 1st, 3rd
+  const place = r => rows.indexOf(r)+1;
+  return `<section class="panel board" aria-label="Leaderboard">
+    <div class="panel-head"><h2>This week’s leaderboard</h2><span class="muted small">${esc(fmtDate(monday,{day:'numeric',month:'short'}))} – ${esc(fmtDate(addDays(monday,6),{day:'numeric',month:'short'}))}</span></div>
+    <div class="muted small">Goal: ${BOARD_WORKOUTS}+ workouts and your own protein target (average over days you logged food). Score = half workouts, half protein.</div>
+    ${!rows.length ? `<div class="empty">${off?'You’re hidden from the leaderboard.':'Nobody is on the board yet this week. Log a workout or a meal and you’ll appear.'}</div>` : `
+    <div class="podium${top.length<3?' few':''}">${order.map(r=>`<div class="pod p${place(r)}${r.user_id===me?' me':''}">
+        <div class="medal">${place(r)}</div><div class="pname">${esc(r.name||'Member')}${r.user_id===me?' <span class="muted">(you)</span>':''}</div>
+        <div class="pscore">${r.score}<small>/100</small></div><div class="pline">${esc(line(r))}</div>${tag(r)}<div class="pblock"></div></div>`).join('')}</div>
+    ${rest.length ? fold('lb-rest', 'Everyone else', `${rest.length} ${rest.length===1?'person':'people'}`, rest.map(r=>`<div class="brow${r.user_id===me?' me':''}"><span class="brank">${place(r)}</span><div><b>${esc(r.name||'Member')}${r.user_id===me?' <span class="muted">(you)</span>':''}</b><div class="muted small">${esc(line(r))}</div></div>${tag(r)||'<span></span>'}<b class="num">${r.score}</b></div>`).join(''), 'inline') : ''}`}
+    <label class="check small"><input type="checkbox" data-action="boardToggle" ${off?'':'checked'}> Show me on the leaderboard (only your name and these weekly numbers are shared)</label>
+  </section>`;
+}
+
 /* ---------- approvals (owner only) ---------- */
 async function loadMembers(){
   if (!S.isAdmin || !SB) return;
@@ -2442,7 +2500,7 @@ async function startFor(user){
   S.pendingUser = null; S.isAdmin = !!m.is_admin;
   S.user = user; S.dbState='connecting'; render();
   if (S.isAdmin) loadMembers();
-  loadPasskeys();
+  loadPasskeys(); loadBoard();
   const db = FL.makeDb(SB, user.id, {
     onStatus: st => { if (S.sync!==st) { S.sync = st; render(); } },
     onError: code => { if (code==='too_large') toast('One change was too large to sync and was skipped.'); },
