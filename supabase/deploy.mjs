@@ -55,7 +55,7 @@ console.log('    done');
 // 3. Edge function
 step(3, 'Deploying the server functions');
 // health-sync is called by an iPhone Shortcut with its own sync key, not a Supabase session.
-for (const [name, verify_jwt] of [['claude', true], ['passkey', true], ['health-sync', false]]) {
+for (const [name, verify_jwt] of [['claude', true], ['passkey', true], ['members', true], ['health-sync', false]]) {
   const fn = await readFile(path.join(HERE, `functions/${name}/index.ts`), 'utf8');
   const form = new FormData();
   form.append('metadata', JSON.stringify({ entrypoint_path: 'index.ts', name, verify_jwt }));
