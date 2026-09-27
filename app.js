@@ -2348,7 +2348,8 @@ async function refreshUsage(){
 // Is this person approved? Cached on the device so the app still opens offline.
 async function memberStatus(user){
   const key = 'mt:member:' + user.id;
-  const { data, error } = await SB.from('members').select('status,is_admin').eq('user_id', user.id).maybeSingle();
+  let data = null, error = null;
+  try { ({ data, error } = await SB.from('members').select('status,is_admin').eq('user_id', user.id).maybeSingle()); } catch (e) { error = e; }
   if (error) { let c=null; try { c = JSON.parse(localStorage.getItem(key)||'null'); } catch {} return c || {status:'unknown'}; }
   const m = data || {status:'pending'};
   try { if (m.status==='approved') localStorage.setItem(key, JSON.stringify(m)); else localStorage.removeItem(key); } catch {}
