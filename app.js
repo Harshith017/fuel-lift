@@ -157,7 +157,7 @@ const S = {
   reports:[], repSel:null, repMarker:null, repBusy:false, repStatus:'', reviews:[], plans:[], planBusy:false, planStatus:'', planFor:null, planNote:'', revBusy:false, revStatus:'',
   queue:[], qBusy:false, qStatus:'', setup:null, setupShown:false,
   photo:null, photoUrl:null, busy:false, ctl:null, status:'', statusErr:false,
-  rev:0, openFolds:(()=>{ try { return new Set(JSON.parse(localStorage.getItem('fl:folds')||'[]')); } catch { return new Set(); } })(), sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
+  rev:0, openFolds:(()=>{ try { return new Set(JSON.parse(localStorage.getItem('fl:folds')||'[]')); } catch { return new Set(); } })(), hidden:(()=>{ try { return new Set(JSON.parse(localStorage.getItem('fl:hidden')||'[]')); } catch { return new Set(); } })(), sync:'saving', user:null, usage:null, auth:{step:'email', email:'', msg:'', busy:false},
 };
 const prof = () => ({...DEFAULT_PROFILE, ...(S.profile||{})});
 const targets = (date) => computeTargets(prof(), date);
@@ -278,13 +278,16 @@ function burnedTotal(day){
   const p=prof(), H=day.health||{}, t=dayTotals(day), w=who(day.date);
   const training = Math.round(t.burned||0);
   if (H.active_kcal) {
-    const moving = Math.round(H.active_kcal), trainingExtra = p.watch_workouts ? 0 : training;
-    return {total:moving+trainingExtra, training, moving, fromHealth:true};
+    const moving = Math.round(H.active_kcal);
+    // Watch records workouts: its active energy already has them, but never show less than
+    // logged training + steps (a session the watch missed still counts).
+    if (p.watch_workouts) { const floor = training + stepsKcal(H.steps, w); return {total:Math.max(moving, floor), training, moving, fromHealth:true, watch:true, floor}; }
+    return {total:moving+training, training, moving, fromHealth:true};
   }
   const moving = stepsKcal(H.steps, w);
   return {total:training+moving, training, moving, fromHealth:false};
 }
-const burnTip = B => B.fromHealth ? `Active energy from Apple Health ${n0(B.moving)}${prof().watch_workouts?'':` + logged training ${n0(B.training)}`} kcal` : `Training & sports ${n0(B.training)} + steps ${n0(B.moving)} kcal`;
+const burnTip = B => B.fromHealth ? (B.watch ? `Apple Health active energy ${n0(B.moving)} kcal (your watch includes workouts), or logged training + steps ${n0(B.floor)} kcal, whichever is higher` : `Active energy from Apple Health ${n0(B.moving)} + logged training ${n0(B.training)} kcal`) : `Training & sports ${n0(B.training)} + steps ${n0(B.moving)} kcal`;
 // Epley; sets above 12 reps are scored as 12 (estimates past that are unreliable).
 const e1rm = s => s.weight>0 ? Calc.e1rm(s.weight, Math.min(s.reps,12)) || 0 : 0;
 
@@ -1335,7 +1338,9 @@ function loadPanel(){
   const weeks = Array.from({length:8},(_,i)=>{ const we=addDays(end,-7*(7-i)); return {date:addDays(we,-6), v:Math.round(sumRange(dayLoad, we, 7))}; });
   const B = acwr(dayBalls, end); const bst = acwrStatus(B.ratio);
   const hasBalls = sumRange(dayBalls, end, 56) > 0;
-  return `<section class="panel" aria-label="Training load"><div class="panel-head"><h2>Training load</h2><span class="muted small">effort × minutes, all sport and gym</span></div>
+  const head = `<div class="panel-head"><h2>Training load</h2><span class="muted small">effort × minutes, all sport and gym</span>${hideBtn('load','training load')}</div>`;
+  if (isHidden('load')) return `<section class="panel" aria-label="Training load">${head}</section>`;
+  return `<section class="panel" aria-label="Training load">${head}
     <div class="row"><span class="pill ${st.cls}">${esc(st.label)}</span><span class="small num">This week ${n0(L.acute)} · 4-week average ${n0(L.chronic)}${L.ratio!==null?` · ratio ${n1(L.ratio)}`:''}</span></div>
     <div class="small">${esc(st.note)}</div>
     ${barChart({rows:weeks, color:'var(--ink-2)', unit:'load', label:'Week load', wide:true})}
@@ -1508,7 +1513,8 @@ function planCard(compact){
   const last = (S.plans||[]).find(p=>p.date<=today);
   const f = last ? planFollow(last) : null;
   const forDate = S.planFor || planTargetDate();
-  const head = `<div class="panel-head"><h2>Next session</h2>${plan?`<span class="muted small">${esc(plan.date===today?'Today':fmtDate(plan.date,{weekday:'long'}))}</span>`:''}</div>`;
+  const head = `<div class="panel-head"><h2>Next session</h2>${plan?`<span class="muted small">${esc(plan.date===today?'Today':fmtDate(plan.date,{weekday:'long'}))}</span>`:''}${compact?'':hideBtn('plan','next session')}</div>`;
+  if (!compact && isHidden('plan')) return `<section class="panel span2" aria-label="Next session">${head}</section>`;
   const controls = `<div class="row"><input id="planNote" type="text" placeholder="Anything coming up? e.g. match on Sunday, nets tomorrow" value="${esc(S.planNote||'')}" style="flex:1 1 100%;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px 10px">
       <div class="seg" role="group" aria-label="Plan for"><button data-action="planFor" data-d="${today}" aria-pressed="${forDate===today}">Today</button><button data-action="planFor" data-d="${addDays(today,1)}" aria-pressed="${forDate!==today}">Tomorrow</button></div>
       <button class="btn sm" data-action="plan" ${S.planBusy||S.aiState==='off'?'disabled':''}>${S.planBusy?'Planning…':plan?'Plan again':'Plan my next session'}</button></div>
@@ -1529,7 +1535,7 @@ function planCard(compact){
       if (plan.short) body += `<div class="small"><b>Short on time:</b> ${esc(plan.short)}</div>`;
       if (plan.avoid.length) body += `<div><h3>Avoid today</h3><ul class="tips">${plan.avoid.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
       if (plan.next) body += `<div class="muted small"><b>After this:</b> ${esc(plan.next)}</div>`;
-      if (plan.exercises.length) body += `<div class="row"><button class="btn ghost sm" data-action="planToLog">I did this, put it in the log box</button></div>`;
+      body += `<div class="row">${plan.exercises.length?'<button class="btn ghost sm" data-action="planToLog">I did this, put it in the log box</button>':''}<span class="spacer"></span><button class="btn ghost sm danger" data-action="planRemove">Remove this workout</button></div>`;
     }
   } else body += `<div class="muted small">Looks at what you actually did over the last 7 days (gym, nets, matches, badminton), how recovered you are, your sleep and your recent weights, then plans the session: what to train, exercises, sets, reps and target weights. If you do something else instead, the next plan adjusts to it.</div>`;
   return `<section class="panel${compact?'':' span2'}" aria-label="Next session">${head}${body}${compact?'':controls}${compact&&!plan?controls:''}</section>`;
@@ -1579,11 +1585,11 @@ function workoutFold(){
 
 /* ---------- UI bits ---------- */
 let toastTimer;
-function toast(msg, undo){
+function toast(msg, undo, ms=6000){
   const t=$('#toast'); t.innerHTML = `<span>${esc(msg)}</span>` + (undo?'<button id="undoBtn">Undo</button>':'');
   t.hidden=false; clearTimeout(toastTimer);
   if (undo) $('#undoBtn').onclick = () => { t.hidden=true; undo(); };
-  toastTimer = setTimeout(()=>{t.hidden=true;}, 6000);
+  toastTimer = setTimeout(()=>{t.hidden=true;}, ms);
 }
 const pct = (v,t) => t>0 ? Math.min(100, v/t*100) : 0;
 function meter(v,t,color,limit=false){
@@ -1738,6 +1744,9 @@ function goalState(v, target, kind){
 const stBar = st => `var(--st-${st})`, stText = st => `var(--st-${st}-t)`;
 function stateKey(){ return `<div class="stkey"><span><i style="background:var(--st-under)"></i>below target</span><span><i style="background:var(--st-at)"></i>on target</span><span><i style="background:var(--st-over)"></i>over</span><span><i style="background:var(--st-plus)"></i>over, and that’s fine</span></div>`; }
 // A row that folds open. Open state survives re-renders (S.openFolds).
+// Hide / show a whole panel; remembered on this device.
+const isHidden = k => S.hidden.has(k);
+const hideBtn = (k, what) => `<button class="linkbtn hidebtn" data-action="toggleHide" data-key="${esc(k)}" aria-expanded="${!isHidden(k)}" aria-label="${isHidden(k)?'Show':'Hide'} ${esc(what)}">${isHidden(k)?'Show':'Hide'}</button>`;
 function fold(key, title, sub, body, cls=''){
   return `<details class="fold${cls?' '+cls:''}" data-fold="${esc(key)}" ${S.openFolds.has(key)?'open':''}><summary><span class="ttl">${title}</span>${sub?`<span class="muted small sub">${sub}</span>`:''}</summary><div class="fold-body">${body}</div></details>`;
 }
@@ -1910,8 +1919,8 @@ function viewGym(){
     <div class="muted small">Changes compare ${S.gymPeriod==='week'?'this week so far':'this month so far'} with all of ${label}. Volume = weight × reps across every set.</div>
     ${growthDash(rows)}
     ${sel ? exerciseDetail(sel) : ''}
-    ${loadPanel()}
     ${planCard(false)}
+    ${loadPanel()}
     <section class="panel folds" aria-label="Exercise library">${fold('g-lib', 'Exercise library', libCount() ? `${n0(libCount())} exercises with how-to` : 'loading…', libraryHtml())}</section>
   </div>`;
 }
@@ -2163,11 +2172,11 @@ function viewTrends(){
   const T = targets(); const goal = Number(prof().steps_goal)||10000;
   const k = v => v>=10000 ? n1(v/1000)+'k' : n0(v);
   const metrics = [
-    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'range', r=>r.T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
+    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'more', goal, v=>n0(v), `goal ${n0(goal)}`],
     ['Protein', r=>r.t?r.t.protein:0, (v,s)=>s?n0(v):`${n0(v)} g`, 'more', r=>r.T.protein, v=>`${n0(v)} g`, `target ${n0(T.protein)} g`],
     ['Burned', r=>r.d&&((r.d.foods||[]).length||(r.d.exercises||[]).length||(r.d.sports||[]).length||Object.keys(r.d.health||{}).length)?burnedTotal(r.d).total:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'more', 0, v=>`${n0(v)} kcal`, 'training + sports + steps'],
+    ['Calories eaten', r=>r.t?r.t.kcal:0, (v,s)=>s?k(v):`${n0(v)} kcal`, 'range', r=>r.T.kcal, v=>`${n0(v)} kcal`, `target ${n0(T.kcal)}`],
     ['Sleep', r=>r.d&&r.d.health&&r.d.health.sleep_min?r.d.health.sleep_min/60:0, (v,s)=>s?n1(v):fmtSleep(v*60), 'more', 7, v=>fmtSleep(v*60), 'aim for 7–9 h'],
-    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps||0, (v,s)=>s?k(v):n0(v), 'more', goal, v=>n0(v), `goal ${n0(goal)}`],
     ['Water', r=>r.t?r.t.water/1000:0, (v,s)=>fmtL(v*1000)+(s?'':' L'), 'more', r=>waterTarget(r.d||emptyDay(r.date), r.T)/1000, v=>`${fmtL(v*1000)} L`, `target ${fmtL(T.water_ml)} L+`],
   ];
   const day = getDay(S.date), dt = dayTotals(day), DT = dayTargets(day);
@@ -2182,14 +2191,15 @@ function viewTrends(){
   const low = MICROS.filter(m=>m.kind!=='limit'&&DT.micros[m.key]&&dt.micros[m.key]/DT.micros[m.key]<0.5).length;
   // targets reached, day by day
   const checks = [
-    ['Calories', r=>r.t&&r.t.kcal ? goalState(r.t.kcal, r.T.kcal, 'range') : null],
+    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps ? goalState(r.d.health.steps, goal, 'more') : null],
     ['Protein', r=>r.t&&r.t.kcal ? goalState(r.t.protein, r.T.protein, 'more') : null],
+    ['Calories', r=>r.t&&r.t.kcal ? goalState(r.t.kcal, r.T.kcal, 'range') : null],
     ['Carbs', r=>r.t&&r.t.kcal ? goalState(r.t.carbs, r.T.carbs, 'range') : null],
     ['Fibre', r=>r.t&&r.t.kcal ? goalState(r.t.fiber, r.T.fiber, 'more') : null],
     ['Added sugar (limit)', r=>r.t&&r.t.kcal ? goalState(r.t.sugar, r.T.sugar, 'limit') : null],
     ['Water', r=>r.t&&r.t.water ? goalState(r.t.water, waterTarget(r.d,r.T), 'more') : null],
-    ['Steps', r=>r.d&&r.d.health&&r.d.health.steps ? goalState(r.d.health.steps, goal, 'more') : null],
     ['Sleep 7 h+', r=>r.d&&r.d.health&&r.d.health.sleep_min ? goalState(r.d.health.sleep_min, 420, 'more') : null],
+
   ];
   const ok = x => x==='at' || x==='plus';
   const hits = checks.reduce((s,[,f])=>s+rows.filter(r=>ok(f(r))).length,0), tries = checks.reduce((s,[,f])=>s+rows.filter(r=>f(r)!==null).length,0);
@@ -2428,9 +2438,7 @@ function viewProfile(){
   const t=dayTotals(getDay(localDate())), TT=dayTargets(getDay(localDate()));
   const rec = recoveryItems(); const reps = S.reports||[]; const rv = (S.reviews||[])[0];
   const plan = (S.plans||[]).find(x=>x.date>=localDate());
-  return `<div class="grid">
-    <div class="panel-head"><h2>Coach</h2></div>
-    <section class="panel"><div class="panel-head"><h3>What to train or play</h3>${plan?`<span class="muted small">${esc(plan.date===localDate()?'Today':fmtDate(plan.date,{weekday:'long'}))}</span>`:''}</div>
+  const coachHtml = `    <section class="panel"><div class="panel-head"><h3>What to train or play</h3>${plan?`<span class="muted small">${esc(plan.date===localDate()?'Today':fmtDate(plan.date,{weekday:'long'}))}</span>`:''}</div>
       ${plan ? `<div class="plan-h"><b>${esc(plan.focus)}</b><span class="pill ${plan.readiness==='good'?'good':plan.readiness==='low'?'bad':'warn'}">readiness ${esc(plan.readiness)}</span></div><div class="small">${esc(plan.why)}</div>`
         : '<div class="muted small">Plans your next gym session or sport day from what you did this week, your recovery and your recent weights.</div>'}
       <div class="row"><button class="btn sm" data-action="goto" data-view="gym">${plan?'See the full session':'Plan my next session'}</button></div>
@@ -2439,6 +2447,10 @@ function viewProfile(){
       ${rec.length ? rec.map(x=>`<div class="act"><div class="nm">${esc(x.label)} <span class="muted small">${esc(fmtDate(x.date,{weekday:'short'}))}</span></div>${recoveryHtml(x.r)}</div>`).join('')
         : '<div class="small">Nothing is still recovering from the last few days, so you’re clear for a hard session.</div>'}
     </section>
+`;
+  return `<div class="grid">
+    <div class="panel-head"><h2>Coach</h2>${hideBtn('coach','coach')}</div>
+    ${isHidden('coach') ? '' : coachHtml}
     <h2 class="sect">My plan</h2>
     <section class="panel folds">
       ${fold('p-goals', 'Daily goals', `${n0(T.kcal)} kcal · ${n0(T.protein)} g protein`, goalsForm())}
@@ -2742,6 +2754,10 @@ document.addEventListener('click', ev => {
     case 'plan': runPlan(); break;
     case 'planFor': S.planFor=b.dataset.d; render(); break;
     case 'planEx': openPlanEx(+b.dataset.i); break;
+    case 'toggleHide': { const k=b.dataset.key; if (S.hidden.has(k)) S.hidden.delete(k); else S.hidden.add(k); try { localStorage.setItem('fl:hidden', JSON.stringify([...S.hidden])); } catch {} render(); break; }
+    case 'planRemove': { const pl=(S.plans||[]).find(x=>x.date>=localDate()); if (!pl) break;
+      S.plans = (S.plans||[]).filter(x=>x.id!==pl.id); render(); if (S.db) S.db.doc('plans/'+pl.id).delete().catch(()=>{});
+      toast('Removed the recommended workout', () => { S.plans = [pl, ...(S.plans||[]).filter(x=>x.id!==pl.id)].sort((a,b)=>b.date.localeCompare(a.date)); render(); if (S.db) S.db.doc('plans/'+pl.id).set(pl).catch(()=>{}); }, 12000); break; }
     case 'planToLog': { const pl=(S.plans||[]).find(x=>x.date>=localDate()); if (S.view!=='today') { S.date=localDate(); setView('today'); } const ta=$('#logText'); if (!pl||!ta) break;
       ta.value = pl.exercises.map(e=>{ const w=planKg(e); return `${e.name} ${e.sets||3}x${String(e.reps).replace(/[^\d-]/g,'').split('-').pop()||8}${w?' @'+w+'kg':''}`; }).join(', ');
       ta.focus(); ta.scrollIntoView({block:'center'}); setStatus('Edit anything you did differently, then tap Log.'); break; }
