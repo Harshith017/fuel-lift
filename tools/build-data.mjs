@@ -10,6 +10,7 @@
 //   data/ex-edb.json    ExerciseDB free version (non-commercial, credit) oss.exercisedb.dev
 //   data/indb.json      Indian Nutrient Databank recipes (CC BY 4.0) github.com/lindsayjaacks/Indian-Nutrient-Databank-INDB-
 //   data/usda.json      USDA FoodData Central SR Legacy (CC0)         fdc.nal.usda.gov
+//   data/activities.json 2024 Adult Compendium of Physical Activities (free, cite) pacompendium.com
 // Every file records its source, licence and credit; see DATA-LICENSES.md.
 // Nothing here needs an API key or costs money.
 
@@ -180,5 +181,32 @@ console.log('Foods');
     credit: 'Foods from USDA FoodData Central (SR Legacy), public domain.',
     columns: 'name, category, units, kcal, protein, carbs, fat, fibre, sugar, sat_fat_g, cholesterol_mg, sodium_mg, potassium_mg, calcium_mg, iron_mg, magnesium_mg, zinc_mg, vitamin_a_mcg, vitamin_c_mg, vitamin_d_mcg, vitamin_b12_mcg, folate_mcg, omega3_g, alcohol_g (per 100 g)',
     items });
+}
+/* ---------- sports and activities ---------- */
+console.log('Activities');
+// 2024 Adult Compendium of Physical Activities: one table per category page.
+{
+  const PAGES = ['sports', 'running', 'walking', 'bicycling', 'water-activities', 'conditioning-exercise', 'dancing', 'winter-activities'];
+  const pages = await cached('compendium-2024.json', async () => {
+    const out = {};
+    for (const p of PAGES) {
+      const r = await fetch(`https://pacompendium.com/${p}/`, { headers: { 'User-Agent': 'Mozilla/5.0 (MaxxTempo data build)' } });
+      if (!r.ok) throw new Error(`pacompendium.com/${p} → ${r.status}`);
+      out[p] = await r.text(); await sleep(500);
+    }
+    return out;
+  });
+  const items = [];
+  for (const p of PAGES) {
+    for (const tr of pages[p].match(/<tr[\s\S]*?<\/tr>/g) || []) {
+      const c = [...tr.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map(m => clean(m[1].replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))));
+      if (c.length >= 3 && /^\d{5}$/.test(c[0]) && /^\d+(\.\d+)?$/.test(c[1])) items.push([c[0], +c[1], c[2], p]);
+    }
+  }
+  if (items.length < 500) throw new Error('Compendium: only ' + items.length + ' rows');
+  await write('activities.json', { source: '2024 Adult Compendium of Physical Activities', url: 'https://pacompendium.com',
+    license: 'Free to use, including commercially; cite the Compendium',
+    credit: 'Activity METs from the 2024 Adult Compendium of Physical Activities (Herrmann SD, Willis EA, Ainsworth BE, et al. J Sport Health Sci 2024;13:6–12).',
+    columns: 'code, MET, description, category', items });
 }
 console.log('Done.');

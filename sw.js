@@ -1,7 +1,7 @@
 /* MaxxTempo service worker: the app opens offline after the first visit.
    Bump VERSION when shipping changes. */
-const VERSION = 'fuel-lift-v36';
-const SHELL = ['./', 'index.html', 'boot.js', 'config.js', 'calc.js', 'foods.js', 'exercises.js', 'backend.js', 'app.js', 'manifest.json', 'icon-192.png', 'icon-180.png', 'icon-512.png'];
+const VERSION = 'fuel-lift-v37';
+const SHELL = ['./', 'index.html', 'boot.js', 'config.js', 'calc.js', 'foods.js', 'exercises.js', 'sports.js', 'backend.js', 'app.js', 'manifest.json', 'icon-192.png', 'icon-180.png', 'icon-512.png'];
 const LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
 
 self.addEventListener('install', e => {
