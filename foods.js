@@ -151,7 +151,18 @@ const FOOD_ROWS = [
 // Grams of alcohol per 100 g, for drinks whose calories are mostly alcohol (7 kcal/g).
 const FOOD_ALCOHOL = { Beer: 3.9 };
 
-const api = { FOOD_MICRO_ORDER, FOOD_ROWS, FOOD_ALCOHOL };
+// Added sugar per 100 g: sugar, jaggery, honey, syrups and sweets, not the sugar that is
+// naturally in fruit, vegetables, milk, curd, grains, pulses or eggs. Foods not listed have none.
+// Whole dates and grapes count as fruit; used to sweeten a dish, the dish counts.
+const FOOD_ADDED_SUGAR = {
+  'Sugar': 100, 'Honey': 82, 'Jaggery': 85, 'Gulab jamun': 38, 'Jalebi': 40, 'Besan ladoo': 32,
+  'Milk chocolate': 47, 'Dark chocolate': 24, 'Ice cream': 21, 'Biscuits': 22, 'Protein bar': 8,
+  'Cornflakes': 8, 'Muesli': 10, 'Cola': 10.6, 'Orange juice': 8.4, 'Sweet lassi': 12,
+  'Tea with milk & sugar': 6, 'Coffee with milk & sugar': 5.5, 'Peanut butter': 5,
+  'White bread': 3, 'Brown bread': 3, 'Pav': 2, 'Veg burger': 3, 'Pizza': 1.5,
+};
+
+const api = { FOOD_MICRO_ORDER, FOOD_ROWS, FOOD_ALCOHOL, FOOD_ADDED_SUGAR };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else Object.assign(root, api);
 })(this);

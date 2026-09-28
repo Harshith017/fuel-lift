@@ -153,3 +153,14 @@ test("step distance", function () {
   near(C.stepsToKm(10000, 180, "male"), 7.47, 0.01);
   assert.strictEqual(C.levelFromSteps(8200), "moderate");
 });
+
+test("added sugar table only lists built-in foods, never more than their total sugar", function () {
+  var names = {}; FOODS.FOOD_ROWS.forEach(function (r) { names[r[0]] = r[8]; });
+  Object.keys(FOODS.FOOD_ADDED_SUGAR).forEach(function (n) {
+    assert.ok(n in names, n + " is a built-in food");
+    assert.ok(FOODS.FOOD_ADDED_SUGAR[n] <= names[n] + 0.01, n + ": added sugar can't exceed total sugar");
+  });
+  ["Banana", "Toned milk", "Curd", "Roti", "Boiled egg", "Dates", "Grapes", "Dal (toor/tadka)"].forEach(function (n) {
+    assert.ok(!(n in FOODS.FOOD_ADDED_SUGAR), n + " has only natural sugar");
+  });
+});
