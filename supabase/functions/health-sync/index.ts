@@ -54,9 +54,18 @@ function num(v: unknown): number | null {
   const parts = String(v).split(/[\n;]+/).map((s) => s.replace(/,/g, "").match(/-?\d+(\.\d+)?/)).filter(Boolean).map((m) => Number(m![0]));
   return parts.length ? parts.reduce((a, b) => a + b, 0) : null;
 }
+// Shortcuts' own duration format, one line per sleep segment: "7:12:30" (h:mm:ss) or,
+// under an hour, "45:00" / "3:20" (m:ss). Minutes, or null if that's not the format.
+function clockText(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const lines = v.split(/[\n;,]+/).map((x) => x.trim()).filter(Boolean);
+  if (!lines.length || !lines.every((x) => /^\d+:\d{2}(:\d{2})?$/.test(x))) return null;
+  return lines.reduce((sum, x) => { const p = x.split(":").map(Number); return sum + (p.length === 3 ? p[0] * 60 + p[1] + p[2] / 60 : p[0] + p[1] / 60); }, 0);
+}
 // Durations written out with units, e.g. "7 hr 10 min", "7h 10m", "25,800 sec".
 // Several lines (one per sleep segment) are added up. Minutes, or null without units.
 function durationText(v: unknown): number | null {
+  const c = clockText(v); if (c != null) return c;
   if (typeof v !== "string" || !/\d\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)\b/i.test(v)) return null;
   let total = 0;
   for (const [, n, u] of v.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|mins?|minutes?|s|secs?|seconds?)\b/gi)) {
