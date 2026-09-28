@@ -199,6 +199,11 @@ create table if not exists public.leaderboard (
   updated_at     timestamptz not null default now(),
   primary key (user_id, week)
 );
+-- Steps and calories burned (training + sports + steps, resting left out), week totals so far.
+alter table public.leaderboard add column if not exists steps      int not null default 0;
+alter table public.leaderboard add column if not exists steps_goal int;
+alter table public.leaderboard add column if not exists burned     int not null default 0;
+alter table public.leaderboard add column if not exists burn_goal  int;
 alter table public.leaderboard enable row level security;
 drop policy if exists "members read the board" on public.leaderboard;
 drop policy if exists "write own board row"   on public.leaderboard;

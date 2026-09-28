@@ -3232,19 +3232,25 @@ function passkeyMenu(){
 }
 
 /* ---------- weekly leaderboard (table "leaderboard" in schema.sql) ---------- */
-// Goal each week (Mon-Sun): 3+ days with gym or sport, and protein at your own target on average.
-const BOARD_WORKOUTS = 3;
+// Goal each week (Mon-Sun): 3+ days with gym or sport, protein at your own target on average,
+// your own daily step goal and about 2,000 kcal burned by moving (ACSM's upper weekly
+// guideline for activity), both counted for the days of the week so far.
+const BOARD_WORKOUTS = 3, BOARD_BURN_WEEK = 2000;
 function weekMonday(date){ const d = new Date(date+'T12:00:00'); const dow = (d.getDay()+6)%7; return addDays(date, -dow); }
 function weekSummary(monday){
-  const today = localDate(); let workouts = 0, pSum = 0, tSum = 0, logged = 0;
-  for (let i=0; i<7; i++) { const date = addDays(monday, i); if (date > today) break; const d = S.days.get(date); if (!d) continue;
+  const today = localDate(); let workouts = 0, pSum = 0, tSum = 0, logged = 0, steps = 0, burned = 0, days = 0;
+  for (let i=0; i<7; i++) { const date = addDays(monday, i); if (date > today) break; days++; const d = S.days.get(date); if (!d) continue;
     if ((d.exercises||[]).length || (d.sports||[]).length) workouts++;
+    steps += Number((d.health||{}).steps)||0;
+    if ((d.foods||[]).length || (d.exercises||[]).length || (d.sports||[]).length || Object.keys(d.health||{}).length) burned += burnedTotal(d).total;
     if ((d.foods||[]).length) { logged++; pSum += dayTotals(d).protein; tSum += dayTargets(d).protein; } }
   const pAvg = logged ? pSum/logged : 0, pTgt = logged ? tSum/logged : targets().protein;
-  const score = Math.round(50*Math.min(1, workouts/BOARD_WORKOUTS) + 50*Math.min(1, pTgt>0 ? pAvg/pTgt : 0));
-  return { workouts, protein_avg: Math.round(pAvg), protein_target: Math.round(pTgt), logged_days: logged, score };
+  const steps_goal = (Number(prof().steps_goal)||10000) * days, burn_goal = Math.round(BOARD_BURN_WEEK * days / 7);
+  const part = (v, g) => g>0 ? Math.min(1, v/g) : 0;
+  const score = Math.round(25*part(workouts, BOARD_WORKOUTS) + 25*part(pAvg, pTgt) + 25*part(steps, steps_goal) + 25*part(burned, burn_goal));
+  return { workouts, protein_avg: Math.round(pAvg), protein_target: Math.round(pTgt), logged_days: logged, steps: Math.round(steps), steps_goal, burned: Math.round(burned), burn_goal, score };
 }
-const boardHit = r => r.workouts >= BOARD_WORKOUTS && r.logged_days > 0 && r.protein_avg >= r.protein_target;
+const boardHit = r => r.workouts >= BOARD_WORKOUTS && r.logged_days > 0 && r.protein_avg >= r.protein_target && (!r.steps_goal || r.steps >= r.steps_goal) && (!r.burn_goal || r.burned >= r.burn_goal);
 let boardT = null, boardLast = '';
 function publishBoard(){
   if (!S.dbReady || !S.user || !SB) return;
@@ -3263,20 +3269,21 @@ function publishBoard(){
 }
 async function loadBoard(){
   if (!SB || !S.user) return;
-  const { data, error } = await SB.from('leaderboard').select('user_id,name,workouts,protein_avg,protein_target,logged_days,score,updated_at').eq('week', weekMonday(localDate()));
+  const { data, error } = await SB.from('leaderboard').select('user_id,name,workouts,protein_avg,protein_target,logged_days,steps,steps_goal,burned,burn_goal,score,updated_at').eq('week', weekMonday(localDate()));
   if (!error) { S.board = data || []; if (S.view==='trends') render(); }
 }
 function boardHtml(){
   const monday = weekMonday(localDate()), me = S.user?.id, off = prof().leaderboard === false;
-  const rows = (S.board||[]).slice().sort((a,b)=> (boardHit(b)-boardHit(a)) || (b.score-a.score) || (b.workouts-a.workouts) || String(a.name).localeCompare(String(b.name)));
-  const line = r => `${r.workouts}/${BOARD_WORKOUTS} workouts · ${r.logged_days?`${n0(r.protein_avg)}/${n0(r.protein_target)} g protein`:'no food logged'}`;
+  const rows = (S.board||[]).slice().sort((a,b)=> (boardHit(b)-boardHit(a)) || (b.score-a.score) || (b.workouts-a.workouts) || ((b.burned||0)-(a.burned||0)) || ((b.steps||0)-(a.steps||0)) || String(a.name).localeCompare(String(b.name)));
+  const kk = v => v>=10000 ? n1(v/1000)+'k' : n0(v);
+  const line = r => `${r.workouts}/${BOARD_WORKOUTS} workouts · ${r.logged_days?`${n0(r.protein_avg)}/${n0(r.protein_target)} g protein`:'no food logged'} · ${kk(r.steps||0)} steps · ${n0(r.burned||0)} kcal burned`;
   const tag = r => boardHit(r) ? '<span class="spill" style="color:var(--st-at-t);background:color-mix(in srgb, var(--st-at) 15%, transparent)">✓ Target hit</span>' : '';
   const top = rows.slice(0,3), rest = rows.slice(3);
   const order = top.length===3 ? [top[1], top[0], top[2]] : top;             // podium: 2nd, 1st, 3rd
   const place = r => rows.indexOf(r)+1;
   return `<section class="panel board" aria-label="Leaderboard">
     <div class="panel-head"><h2>This week’s leaderboard</h2><span class="muted small">${esc(fmtDate(monday,{day:'numeric',month:'short'}))} – ${esc(fmtDate(addDays(monday,6),{day:'numeric',month:'short'}))}</span></div>
-    <div class="muted small">Goal: ${BOARD_WORKOUTS}+ workouts and your own protein target (average over days you logged food). Score = half workouts, half protein.</div>
+    <div class="muted small">Goal: ${BOARD_WORKOUTS}+ workouts, your own protein target (average over days you logged food), your daily step goal, and about ${n0(BOARD_BURN_WEEK)} kcal burned by moving over the week (training, sports and steps; steps and kcal count the days so far). Score = a quarter each.</div>
     ${!rows.length ? `<div class="empty">${off?'You’re hidden from the leaderboard.':'Nobody is on the board yet this week. Log a workout or a meal and you’ll appear.'}</div>` : `
     <div class="podium${top.length<3?' few':''}">${order.map(r=>`<div class="pod p${place(r)}${r.user_id===me?' me':''}">
         <div class="medal">${place(r)}</div><div class="pname">${esc(r.name||'Member')}${r.user_id===me?' <span class="muted">(you)</span>':''}</div>
