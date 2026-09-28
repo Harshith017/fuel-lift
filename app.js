@@ -1024,31 +1024,46 @@ function todayBanners(){
 function startSetup(step){
   const p = prof();
   const keys = Object.keys(p.sports||{});
-  S.setup = {step: step||'about', about:{name:p.name||'', sex:p.sex, birth:p.birth||'', height_cm:p.height_cm, weight_kg:p.weight_kg, goal:p.goal, goal_rate:p.goal_rate, activity:p.activity, watch_workouts:!!p.watch_workouts},
-    sports:keys, other:'', answers:Object.fromEntries(keys.map(k=>[k, Object.fromEntries(((p.sports[k]||{}).answers||[]).map(a=>[a.id,a.a]))])), qs:{}};
+  const fresh = !S.profile; // first time: no made-up defaults for the required details
+  S.setup = {step: step||'about', about:{name:p.name||'', sex:fresh?'':p.sex, birth:p.birth||'', height_cm:fresh?'':p.height_cm, weight_kg:fresh?'':p.weight_kg, goal:fresh?'':p.goal, goal_rate:p.goal_rate, activity:p.activity, watch_workouts:!!p.watch_workouts},
+    withPw:needsPw(), sports:keys, other:'', answers:Object.fromEntries(keys.map(k=>[k, Object.fromEntries(((p.sports[k]||{}).answers||[]).map(a=>[a.id,a.a]))])), qs:{}};
   S.view='setup'; render(); window.scrollTo({top:0});
 }
-function setupSteps(){ return ['about','sports', ...S.setup.sports.map(k=>'sport:'+k), 'done']; }
+// Accounts made by "Request access" have no password until they choose one here.
+const needsPw = () => !!S.user?.user_metadata?.needs_password;
+function setupSteps(){ return ['about', ...(S.setup.withPw?['password']:[]), 'sports', ...S.setup.sports.map(k=>'sport:'+k), 'done']; }
 function viewSetup(){
   const su = S.setup, steps = setupSteps(), idx = steps.indexOf(su.step), a = su.about;
   const head = `<div class="panel-head"><h2>Set up</h2><span class="muted small">Step ${idx+1} of ${steps.length}</span></div>`;
-  const nav = (next='Next') => `<div class="row"><button class="btn ghost" data-action="setupBack" ${idx===0?'hidden':''}>Back</button><span class="spacer"></span>${idx===0?`<button class="linkbtn" data-action="setupSkip">Skip for now</button>`:''}<button class="btn" data-action="setupNext">${next}</button></div>`;
+  const optional = idx > steps.indexOf(su.withPw ? 'password' : 'about') && su.step!=='done';
+  const nav = (next='Next') => `<div class="row"><button class="btn ghost" data-action="setupBack" ${idx===0||su.step==='password'||(su.withPw&&su.step==='sports')?'hidden':''}>Back</button><span class="spacer"></span>${idx===0&&S.profile&&!su.withPw?`<button class="linkbtn" data-action="setupSkip">Skip for now</button>`:''}${optional?`<button class="linkbtn" data-action="setupFinish">Skip the rest</button>`:''}<button class="btn" data-action="setupNext" ${su.step==='password'&&!su.pwSaved?'disabled':''}>${next}</button></div>`;
   const sel = (key, obj) => Object.entries(obj).map(([k,v])=>`<option value="${k}" ${String(a[key])===k?'selected':''}>${esc(v.label||v)}</option>`).join('');
   if (su.step==='about') return `<section class="panel setup">${head}
-    <h3>About you</h3><p class="muted small">This sets your calorie, protein, water and nutrient targets.</p>
+    <h3>About you</h3><p class="muted small">This sets your calorie, protein, water and nutrient targets.${S.profile?'':' Name, date of birth, height, weight, sex and goal are needed to start.'}</p>
     <div class="form">
       <label class="field full">Your name<input type="text" maxlength="40" autocomplete="given-name" data-bind="about.name" placeholder="What should the app call you?" value="${esc(a.name||'')}"></label>
-      <label class="field">Sex<select data-bind="about.sex">${sel('sex',{male:'Male',female:'Female'})}</select></label>
+      <label class="field">Sex<select data-bind="about.sex">${a.sex?'':'<option value="" selected>Choose…</option>'}${sel('sex',{male:'Male',female:'Female'})}</select></label>
       <label class="field">Date of birth<input type="date" data-bind="about.birth" max="${localDate()}" value="${esc(a.birth)}"></label>
       <label class="field">Height (cm)<input type="number" step="0.5" data-bind="about.height_cm" value="${esc(a.height_cm)}"></label>
       <label class="field">Weight (kg)<input type="number" step="0.1" data-bind="about.weight_kg" value="${esc(a.weight_kg)}"></label>
       <label class="field full">Daily life, not counting gym and sport<select data-bind="about.activity">${sel('activity',ACTIVITY)}</select><span class="hint">Logged training is added on the day you do it.</span></label>
-      <label class="field">Goal<select data-bind="about.goal">${sel('goal',GOALS)}</select></label>
+      <label class="field">Goal<select data-bind="about.goal">${a.goal?'':'<option value="" selected>Choose…</option>'}${sel('goal',GOALS)}</select></label>
       <label class="field">Rate (kg / week)<select data-bind="about.goal_rate">${sel('goal_rate',{'0.25':'0.25','0.5':'0.5','0.75':'0.75','1':'1'})}</select></label>
       <label class="check full"><input type="checkbox" data-bind="about.watch_workouts" ${a.watch_workouts?'checked':''}> I record gym and sport sessions on an Apple Watch</label>
     </div>${nav()}</section>`;
+  if (su.step==='password') return `<section class="panel setup">${head}
+    <h3>Choose a password</h3><p class="muted small">You’ll sign in with your email and this password${window.PublicKeyCredential?`, or with ${bioName()} once it’s turned on`:''}.</p>
+    ${su.pwSaved ? `<div class="banner" style="border-left-color:var(--good)">Password saved.</div>
+      ${window.PublicKeyCredential && S.bioOK!==false && !(S.passkeys||[]).length ? `<div class="banner" style="border-left-color:var(--accent)"><b>Sign in with ${bioName()} next time?</b> Quicker than typing your password. <button class="linkbtn" data-action="faceIdSetup" ${S.pkBusy?'disabled':''}>Turn it on</button></div>` : (S.passkeys||[]).length ? `<div class="muted small">${bioName()} is on for this device.</div>` : ''}`
+    : `<div class="form">
+      <label class="field full">Password<input id="suPass" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters"></label>
+      <label class="field full">Type it again<input id="suPass2" type="password" autocomplete="new-password" minlength="8"></label>
+    </div>
+    <div class="row"><span class="spacer"></span><button class="btn" data-action="setupPassword" ${su.pwBusy?'disabled':''}>${su.pwBusy?'Saving…':'Save password'}</button></div>`}
+    ${su.pwMsg?`<div class="status err">${esc(su.pwMsg)}</div>`:''}
+    ${nav()}</section>`;
   if (su.step==='sports') return `<section class="panel setup">${head}
-    <h3>What do you play or train?</h3><p class="muted small">Pick everything you do regularly. I’ll ask a few questions about each one.</p>
+    <h3>What do you play or train?</h3><p class="muted small">Pick everything you do regularly and I’ll ask a few questions about each one. You can skip this and add sports later in Profile.</p>
     <div class="opts">${SPORT_CHOICES.map(([k,l])=>`<button class="opt" data-action="setupSport" data-key="${k}" aria-pressed="${su.sports.includes(k)}">${esc(l)}</button>`).join('')}
       ${su.sports.filter(k=>!SPORT_CHOICES.some(c=>c[0]===k)).map(k=>`<button class="opt" data-action="setupSport" data-key="${esc(k)}" aria-pressed="true">${esc(sportName(k))}</button>`).join('')}</div>
     <div class="row"><input id="setupOther" type="text" placeholder="Something else, e.g. kabaddi" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:9px 10px"><button class="btn ghost sm" data-action="setupAddOther">Add</button></div>
@@ -1071,8 +1086,31 @@ async function setupLoadQuestions(k){
   if (!S.setup.qs[k].length) S.setup.qs[k] = [{id:'about', text:`Describe how you usually do ${sportName(k)}: level, intensity, typical session length and how often.`, type:'text'}];
   if (S.view==='setup') render();
 }
+// Step 1 is required; it's saved straight away so the rest can be skipped.
+async function saveAbout(){
+  const a = S.setup.about, p = prof();
+  const miss = [!String(a.name||'').trim()&&'your name', !(/^\d{4}-\d{2}-\d{2}$/.test(a.birth||'') && Calc.ageOn(a.birth, localDate())>=13)&&'your date of birth', !num(a.height_cm,250)&&'your height', !num(a.weight_kg,300)&&'your weight', !a.sex&&'your sex', !a.goal&&'your goal'].filter(Boolean);
+  if (miss.length) { toast(`Add ${miss.join(', ')} to continue.`); return false; }
+  await saveProfile({...p, name:String(a.name).trim().slice(0,40), sex:a.sex, birth:a.birth, age:Calc.ageOn(a.birth, localDate()), height_cm:num(a.height_cm,250), weight_kg:num(a.weight_kg,300), activity:actId(a.activity), goal:a.goal, goal_rate:Number(a.goal_rate)||0.5, watch_workouts:!!a.watch_workouts});
+  if (!getDay(localDate()).weight_kg) writeDay(localDate(), d => { d.weight_kg = num(a.weight_kg,300); });
+  return true;
+}
+async function setupPassword(){
+  const su = S.setup, pw = $('#suPass')?.value||'', pw2 = $('#suPass2')?.value||'';
+  su.pwMsg = pw.length<8 ? 'Choose a password of at least 8 characters.' : pw!==pw2 ? 'The two passwords don’t match.' : '';
+  if (su.pwMsg) { render(); return; }
+  su.pwBusy = true; render();
+  if (await pwnedPassword(pw)) { su.pwBusy=false; su.pwMsg=PWNED_MSG; render(); return; }
+  const { data, error } = await SB.auth.updateUser({ password:pw, data:{ needs_password:false } });
+  su.pwBusy = false;
+  if (error) { su.pwMsg = authErrMsg(error, 'Couldn’t save the password. Try again.'); render(); return; }
+  if (data?.user) S.user = data.user;
+  su.pwSaved = true; render();
+}
 async function setupGo(dir){
   const su = S.setup, steps = setupSteps(); let i = steps.indexOf(su.step) + dir;
+  if (dir>0 && su.step==='about') { if (!(await saveAbout())) return; }
+  if (dir>0 && su.step==='password' && !su.pwSaved) return;
   if (dir>0 && su.step==='done') {
     const p = prof(); const a = su.about; const sports = {};
     for (const k of su.sports) { const qs = SPORT_Q[k] || su.qs[k] || []; const prev = (p.sports||{})[k];
@@ -2676,7 +2714,7 @@ function onProfileSubmit(ev){
     calorie_override:optNum(v('#pf_kcal'),6000), protein_override:optNum(v('#pf_prot'),400), carbs_override:optNum(v('#pf_carbs'),900), fat_override:optNum(v('#pf_fat'),300), fiber_override:optNum(v('#pf_fibre'),120), water_override_ml:optNum(v('#pf_water'),8000), steps_goal:optNum(v('#pf_steps'),50000)||10000};
   saveProfile(p); toast('Profile saved. Targets updated.');
 }
-function setView(v){ S.view=v; S.status=''; S.statusErr=false; render(); window.scrollTo({top:0}); if (v==='trends') loadBoard(); }
+function setView(v){ if (S.user && S.profile && needsPw() && v!=='setup') { if (!S.setup) startSetup('password'); return; } S.view=v; S.status=''; S.statusErr=false; render(); window.scrollTo({top:0}); if (v==='trends') loadBoard(); }
 
 document.addEventListener('click', ev => {
   const b = ev.target.closest('[data-action],[data-view].tab'); if (!b) return;
@@ -2718,6 +2756,8 @@ document.addEventListener('click', ev => {
     case 'rmSport': { const k=b.dataset.key, p=prof(); const sp={...(p.sports||{})}; const old=sp[k]; delete sp[k]; saveProfile({...p, sports:sp}); toast(`Removed ${old?.name||k}`, () => saveProfile({...prof(), sports:{...(prof().sports||{}), [k]:old}})); break; }
     case 'startSetup': startSetup(b.dataset.step); break;
     case 'setupNext': setupGo(1); break;
+    case 'setupPassword': setupPassword(); break;
+    case 'setupFinish': S.setup.step='done'; setupGo(1); break;
     case 'setupBack': setupGo(-1); break;
     case 'setupSkip': S.setup=null; S.view='today'; render(); break;
     case 'setupSport': { const k=b.dataset.key; const l=S.setup.sports; const i=l.indexOf(k); if (i>=0) l.splice(i,1); else l.push(k); render(); break; }
@@ -2767,10 +2807,11 @@ document.addEventListener('click', ev => {
     case 'resetGoal': { const p={...prof()}; p[b.dataset.key]=null; saveProfile(p); toast('Back to the suggested goal.'); break; }
     case 'rmFood': { const k=b.dataset.key; const f=(S.myFoods||{})[k]; if(!f) break; const m={...S.myFoods}; delete m[k]; S.myFoods=m; S.myFoodsVer++; if (S.db) S.db.doc('foods/'+k).delete().catch(()=>{}); render(); toast(`Removed ${f.name} from your food list`); break; }
     case 'importIndb': importIndb(); break;
-    case 'authSend': authSend(); break;
-    case 'authVerify': authVerify(); break;
     case 'authPassword': authPassword(); break;
-    case 'authSignUp': authSignUp(); break;
+    case 'authRequest': S.auth={step:'request', email:($('#authEmail')?.value||'').trim().toLowerCase(), msg:'', busy:false}; render(); setTimeout(()=>$('#reqEmail')?.focus(), 50); break;
+    case 'accessRequest': accessRequest(); break;
+    case 'accessCheck': accessCheck(false); break;
+    case 'accessCancel': setClaim(null); clearTimeout(accessTimer); S.auth={step:'request', email:'', msg:'', busy:false}; render(); break;
     case 'setPassword': setPassword(); break;
     case 'authOAuth': authOAuth(b.dataset.p); break;
     case 'faceIdSignIn': authFaceId(); break;
@@ -2837,7 +2878,7 @@ document.addEventListener('keydown', ev => {
   if (ev.key==='Enter' && ev.target.id==='authEmail') { ev.preventDefault(); $('#authPass')?.focus(); }
   if (ev.key==='Enter' && ev.target.id==='authPass') { ev.preventDefault(); authPassword(); }
   if (ev.key==='Enter' && ev.target.id==='newPass') { ev.preventDefault(); setPassword(); }
-  if (ev.key==='Enter' && ev.target.id==='authCode') { ev.preventDefault(); authVerify(); }
+  if (ev.key==='Enter' && ev.target.id==='reqEmail') { ev.preventDefault(); accessRequest(); }
 });
 $('#reportInput').addEventListener('change', ev => { const fs=[...(ev.target.files||[])]; ev.target.value=''; onReportFiles(fs); });
 $('#photoInput').addEventListener('change', ev => { const f=ev.target.files?.[0]; ev.target.value=''; if(!f) return; clearPhoto(); S.photo=f; S.photoUrl=URL.createObjectURL(f); S.status=''; render(); });
@@ -2943,13 +2984,14 @@ function authView(){
     ${S.mcMsg?`<div class="status err">${esc(S.mcMsg)}</div>`:''}</section>`;
   const a = S.auth, cfgOk = window.FL_CONFIG && /^https:\/\//.test(FL_CONFIG.SUPABASE_URL||'') && FL_CONFIG.SUPABASE_ANON_KEY && !/YOUR_/.test(FL_CONFIG.SUPABASE_ANON_KEY);
   if (!cfgOk) return `<section class="panel setup"><h2>Almost there</h2><p>This copy of MaxxTempo isn’t connected to a database yet. Put your Supabase project URL and anon key in <b>config.js</b>, following SETUP.md.</p></section>`;
-  if (a.step==='confirm') return `<section class="panel setup"><h2>Confirm your email</h2>
-    <p>We sent a confirmation link to <b>${esc(a.email)}</b>. Tap it once (any browser is fine), then come back here and sign in with your password.</p>
-    <div class="row"><span class="spacer"></span><button class="btn" data-action="authBack">Back to sign in</button></div></section>`;
-  if (a.step==='code') return `<section class="panel setup"><h2>Check your email</h2>
-    <p>We sent a sign-in email to <b>${esc(a.email)}</b>. Tap the link in it on this device, in this browser. If the email shows a code, type it here.</p>
-    <label class="field">Code<input id="authCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456"></label>
-    <div class="row"><button class="btn ghost" data-action="authBack">Use another email</button><span class="spacer"></span><button class="btn" data-action="authVerify" ${a.busy?'disabled':''}>${a.busy?'Checking…':'Sign in'}</button></div>
+  if (a.step==='request') return `<section class="panel setup"><h2>Request access</h2>
+    <p class="muted">Type your email. The owner gets your request, and as soon as they approve it this phone signs you in. Then you add your details and choose a password.</p>
+    <label class="field">Email<input id="reqEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(a.email)}"></label>
+    <div class="row"><button class="btn ghost" data-action="authBack">Back to sign in</button><span class="spacer"></span><button class="btn" data-action="accessRequest" ${a.busy?'disabled':''}>${a.busy?'Sending…':'Request access'}</button></div>
+    <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
+  if (a.step==='waiting') return `<section class="panel setup"><h2>Waiting for approval</h2>
+    <p>Your request for <b>${esc(a.email)}</b> has been sent to the owner. Keep this page open, or come back to MaxxTempo on this phone later: you’ll be signed in as soon as they approve it.</p>
+    <div class="row"><button class="btn ghost" data-action="accessCancel">Use another email</button><span class="spacer"></span><button class="btn" data-action="accessCheck" ${a.busy?'disabled':''}>${a.busy?'Checking…':'Check now'}</button></div>
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
   return `<section class="panel setup"><h2>Sign in</h2>
     <p class="muted">Your food, training and health logs are private to you and sync across your phone and laptop.</p>
@@ -2959,9 +3001,9 @@ function authView(){
     </div><div class="ordiv"><span>or use email</span></div>`:''}
     <label class="field">Email<input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(a.email)}"></label>
     <label class="field">Password<input id="authPass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></label>
-    <div class="row"><button class="btn ghost" data-action="authSignUp" ${a.busy?'disabled':''}>Create account</button><span class="spacer"></span><button class="btn" data-action="authPassword" ${a.busy?'disabled':''}>${a.busy?'Working…':'Sign in'}</button></div>
-    <button class="linkbtn" data-action="forgotPw" style="align-self:flex-start;padding-left:0">Forgot password?</button>
-    <div class="row"><button class="btn ghost sm" data-action="authSend" ${a.busy?'disabled':''}>Email me a sign-in link instead</button></div>
+    <div class="row"><button class="linkbtn" data-action="forgotPw" style="padding-left:0">Forgot password?</button><span class="spacer"></span><button class="btn" data-action="authPassword" ${a.busy?'disabled':''}>${a.busy?'Working…':'Sign in'}</button></div>
+    <div class="ordiv"><span>new here?</span></div>
+    <button class="btn ghost" data-action="authRequest">Request access with your email</button>
     <div class="status${a.err?' err':''}">${esc(a.msg||'')}</div></section>`;
 }
 const redirectTo = () => location.origin + location.pathname;
@@ -2984,22 +3026,6 @@ async function mustChangeSave(){
   S.mcBusy=false;
   if (error) { S.mcMsg = authErrMsg(error, 'Couldn’t save the password. Try again.'); render(); return; }
   S.mustChange = null; toast('Password saved. Use it from now on.'); startFor(data.user);
-}
-async function authSend(){
-  const email = ($('#authEmail')?.value||'').trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { S.auth={...S.auth, email, msg:'Enter your email address.', err:true}; render(); return; }
-  S.auth={step:'email', email, busy:true, msg:''}; render();
-  const { error } = await SB.auth.signInWithOtp({ email, options:{ emailRedirectTo:redirectTo() } });
-  S.auth = error ? {step:'email', email, busy:false, err:true, msg: authErrMsg(error, 'Couldn’t send the email. Check the address and try again.')}
-                 : {step:'code', email, busy:false, msg:''};
-  render(); if (!error) setTimeout(()=>$('#authCode')?.focus(), 50);
-}
-async function authVerify(){
-  const token = ($('#authCode')?.value||'').replace(/\D/g,'');
-  if (token.length<6) { S.auth={...S.auth, msg:'Enter the code from the email.', err:true}; render(); return; }
-  S.auth={...S.auth, busy:true, msg:''}; render();
-  const { error } = await SB.auth.verifyOtp({ email:S.auth.email, token, type:'email' });
-  if (error) { S.auth={...S.auth, busy:false, err:true, msg:'That code didn’t work. It may have expired; send a new one.'}; render(); }
 }
 const authCreds = () => ({ email:($('#authEmail')?.value||'').trim().toLowerCase(), password:$('#authPass')?.value||'' });
 function authCheck(email, password, minLen){
@@ -3027,18 +3053,48 @@ async function authPassword(){
   const { error } = await SB.auth.signInWithPassword({ email, password });
   if (error) { S.auth={step:'email', email, busy:false, err:true, msg:
     /confirm/i.test(error.message) ? 'Confirm your email first: tap the link we sent you, then sign in.' :
-    /invalid/i.test(error.message) ? 'Wrong email or password. New here? Tap Create account. Signed in by email link before? Use the link, then set a password under Profile → Account.' :
+    /invalid/i.test(error.message) ? 'Wrong email or password. New here? Tap Request access. Forgot your password? Ask the owner for a temporary one.' :
     'Couldn’t sign in. Check your connection and try again.' }; render(); }
 }
-async function authSignUp(){
-  const { email, password } = authCreds(), bad = authCheck(email, password, 8);
-  if (bad) { S.auth={...S.auth, email, msg:bad, err:true}; render(); return; }
-  S.auth={step:'email', email, busy:true, msg:''}; render();
-  if (await pwnedPassword(password)) { S.auth={step:'email', email, busy:false, err:true, msg:PWNED_MSG}; render(); return; }
-  const { data, error } = await SB.auth.signUp({ email, password, options:{ emailRedirectTo:redirectTo() } });
-  if (error) S.auth={step:'email', email, busy:false, err:true, msg: authErrMsg(error, 'Couldn’t create the account. Check the address and try again.')};
-  else if (data.user && !data.user.identities?.length) S.auth={step:'email', email, busy:false, err:true, msg:'That email already has an account. Sign in, or use the email link and then set a password under Profile → Account.'};
-  else if (!data.session) S.auth={step:'confirm', email, busy:false, msg:''};
+/* ---------- joining without email (supabase/functions/access) ----------
+   A new person types their email; the owner approves; this phone is then signed in
+   with the private claim key it got when asking. */
+const CLAIM_KEY = 'mt:claim';
+const getClaim = () => { try { return JSON.parse(localStorage.getItem(CLAIM_KEY)||'null'); } catch { return null; } };
+const setClaim = c => { try { c ? localStorage.setItem(CLAIM_KEY, JSON.stringify(c)) : localStorage.removeItem(CLAIM_KEY); } catch {} };
+const HAS_ACCOUNT = 'That email already has an account. Sign in with your password or Face ID. Forgot your password? Ask the owner for a temporary one.';
+async function accessRequest(){
+  const email = ($('#reqEmail')?.value||'').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { S.auth={...S.auth, email, err:true, msg:'Enter your email address.'}; render(); return; }
+  S.auth={step:'request', email, busy:true, msg:''}; render();
+  let r;
+  try { r = await fnCall('access', 'request', {email}); }
+  catch (e) { S.auth={step:'request', email, busy:false, err:true, msg: e?.code==='rate_limited' ? 'Lots of requests right now. Try again in an hour.' : e?.code==='offline' ? 'You’re offline. Connect to the internet and try again.' : e?.code==='bad_email' ? 'That email address doesn’t look right.' : 'Couldn’t send the request. Try again.'}; render(); return; }
+  if (r.state==='has_account') { S.auth={step:'email', email, busy:false, err:true, msg:HAS_ACCOUNT}; render(); return; }
+  if (r.state==='declined') { S.auth={step:'email', email, busy:false, err:true, msg:'This email wasn’t approved. Ask the owner if that’s a mistake.'}; render(); return; }
+  setClaim({email, key:r.key, at:Date.now()}); S.auth={step:'waiting', email, busy:false, msg:''}; render();
+  if (r.state==='approved') accessCheck(true); else pollAccess();
+}
+let accessTimer = null;
+function pollAccess(){
+  clearTimeout(accessTimer);
+  accessTimer = setTimeout(async () => { if (S.auth.step!=='waiting' || S.user) return; if (document.visibilityState==='visible') await accessCheck(true); pollAccess(); }, 15000);
+}
+async function accessCheck(quiet){
+  const c = getClaim(); if (!c) { S.auth={step:'request', email:S.auth.email||'', msg:'', busy:false}; render(); return; }
+  if (!quiet) { S.auth={...S.auth, busy:true, err:false, msg:''}; render(); }
+  let r;
+  try { r = await fnCall('access', 'status', {email:c.email, key:c.key}); }
+  catch (e) { S.auth={step:'waiting', email:c.email, busy:false, err:!quiet, msg: quiet ? '' : e?.code==='offline' ? 'You’re offline. Connect to the internet and tap Check now.' : 'Couldn’t check. Try again in a moment.'}; render(); return; }
+  if (r.state==='approved' && r.token_hash) {
+    setClaim(null); clearTimeout(accessTimer);
+    const { error } = await SB.auth.verifyOtp({ token_hash:r.token_hash, type:'magiclink' });
+    S.auth = error ? {step:'request', email:c.email, busy:false, err:true, msg:'You were approved, but signing in didn’t finish. Request access again with the same email; it goes straight through.'} : {step:'email', email:'', msg:'', busy:false};
+    render(); return;
+  }
+  if (r.state==='declined') { setClaim(null); S.auth={step:'email', email:c.email, busy:false, err:true, msg:'The owner didn’t approve this email.'}; }
+  else if (r.state==='expired') { setClaim(null); S.auth={step:'request', email:c.email, busy:false, err:true, msg:'This request expired or was replaced by a newer one. Request access again.'}; }
+  else S.auth={step:'waiting', email:c.email, busy:false, err:false, msg: quiet ? '' : 'Not approved yet. You’ll be signed in automatically once it is.'};
   render();
 }
 async function setPassword(){
@@ -3305,7 +3361,9 @@ async function startFor(user){
   S.aiState = S.sample ? 'on' : 'off'; S.canPhoto = !!S.sample;
   db.doc('profile/me').onSnapshot(snap => { S.profile = snap.exists ? {...snap.data()} : null; S.rev++;
     if (!S.profile && !S.setupShown && !snap.metadata?.fromCache) { S.setupShown = true; startSetup('about'); return; }
-    if (S.profile) S.setupShown = true; render(); });
+    if (S.profile) S.setupShown = true;
+    if (S.profile && needsPw() && !S.setup) { startSetup('password'); return; }
+    render(); });
   db.collection('reports').orderBy('report_date','desc').limit(50).onSnapshot(snap => { S.reports = snap.docs.map(d=>({...d.data()})); render(); });
   db.collection('foodlib').onSnapshot(snap => { if (S.indbBuiltIn) return; const rows=[]; for (const d of snap.docs) { try { rows.push(...JSON.parse(d.data().rows||'[]')); } catch {} } S.libFoods = rows.map(r=>rowToFood(r,'indb')); S.myFoodsVer=(S.myFoodsVer||0)+1; });
   db.collection('foods').limit(1000).onSnapshot(snap => { const m={}; for (const d of snap.docs) m[d.id]={...d.data()}; S.myFoods=m; S.myFoodsVer=(S.myFoodsVer||0)+1; });
@@ -3336,7 +3394,9 @@ render();
   if (!window.supabase || !/^https:\/\//.test(cfg.SUPABASE_URL||'') || /YOUR_/.test(cfg.SUPABASE_ANON_KEY||'YOUR_')) { render(); return; }
   SB = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true, flowType:'pkce' } });
   const { data:{ session } } = await SB.auth.getSession();
-  if (session?.user) startFor(session.user); else render();
+  if (session?.user) startFor(session.user);
+  else { const c = getClaim(); if (c) { S.auth={step:'waiting', email:c.email, msg:'', busy:false}; accessCheck(true); pollAccess(); } render(); }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState==='visible' && S.auth.step==='waiting' && !S.user) accessCheck(true); });
   SB.auth.onAuthStateChange((ev, sess) => {
     if (sess?.user) startFor(sess.user);
     else if (ev==='SIGNED_OUT') { S.user=null; S.pendingUser=null; S.isAdmin=false; S.passkeys=null; render(); }
