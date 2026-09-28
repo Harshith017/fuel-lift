@@ -630,12 +630,18 @@ function localParse(text, date){
     else { prev = {id:uid(), ...g.exercise, kcal_hint:null, time:nowTime()}; delete prev.kind; exercises.push(prev); prev.kind = g.exercise.kind; }
     return true; };
   // Commas and new lines separate entries; gym sets are read before "and"/"+" split them ("pull ups +10kg 3x8").
-  // Match details ("bowled 6 overs", "won 2 sets") belong with the sport: leave those to the AI coach.
-  const sports = [], sportDetail = /\b(bowl(?:ed|ing)?|overs?|batt(?:ed|ing)|faced|wickets?|innings|scored|goals?|laps?|won|lost)\b/i.test(text);
+  const sports = [];
   for (const chunk of text.split(/\s*(?:,|;|\n)\s*/).map(x=>x.trim()).filter(Boolean)) {
     if (gymHit(chunk)) continue;
-    const sp = sportDetail ? null : sportFromText(chunk, date); if (sp) { sports.push({...sp, entry:chunk}); prev = null; continue; }
-    for (const p of chunk.split(/\s*(?:\+|&|\band\b|\bwith\b)\s*/i).map(x=>x.trim()).filter(Boolean)) {
+    // "cricket nets 90 min, bowled 6 overs": details after a comma belong to the session before.
+    const last = sports[sports.length-1];
+    if (last && typeof Sports!=='undefined' && Sports.isDetail(chunk)) { const sp = sportFromText(last.entry+' '+chunk, date); if (sp) { sports[sports.length-1] = {...sp, entry:last.entry+', '+chunk}; continue; } }
+    let foodText = chunk;
+    if (typeof Sports!=='undefined' && Sports.ready()) {
+      const {acts, rest:other} = Sports.split(chunk); const got = acts.map(t => [t, sportFromText(t, date)]);
+      if (got.length && got.every(([,sp]) => sp)) { for (const [t,sp] of got) sports.push({...sp, entry:t}); prev = null; if (!other.length) continue; foodText = other.join(' and '); }
+    }
+    for (const p of foodText.split(/\s*(?:\+|&|\band\b|\bwith\b)\s*/i).map(x=>x.trim()).filter(Boolean)) {
       const r = parsePart(p);
       if (!r) { if (!gymHit(p)) { rest.push(p); prev = null; } continue; }
       prev = null; if (r.skip) continue; if (r.water) { water += r.water; continue; }
@@ -665,9 +671,11 @@ async function submitLog(){
   const ta = $('#logText'); const text = (ta?.value||'').trim();
   if (!text && !S.photo) { setStatus('Type what you ate, drank or lifted, or add a photo.', true); return; }
   const date = S.date; const p = prof();
+  if (text && !S.photo) await Promise.race([loadActs(), new Promise(r => setTimeout(r, 3000))]);
   const local = (text && !S.photo) ? localParse(text, date) : {foods:[], water:0, rest:text?[text]:[], exercises:[], sports:[]};
   const localGym = local.exercises.length ? Gym.recovery(local.exercises) : null;
   const restText = local.rest.join(', ');
+  const localActs = local.sports.map(sp => makeActivity({key:sp.key, name:sp.name, entry:sp.entry, date, time:nowTime(), qa:[]}, sp.res));
   const needAI = !!S.photo || restText.length > 0;
   if (needAI && !S.sample) {
     if (local.foods.length || local.water || local.exercises.length || localActs.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym, sportsLocal:localActs}); if ($('#logText')) $('#logText').value = restText; setStatus(`Logged what’s in the built-in tables. AI isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
@@ -678,7 +686,6 @@ async function submitLog(){
   const slow1 = setTimeout(() => { if (S.busy) setStatus('Google’s AI is slow right now; trying another model…'); }, 12000);
   const slow2 = setTimeout(() => { if (S.busy) setStatus('Still trying other AI models… You can tap Stop and log it later.'); }, 45000);
   const nLocal = local.foods.length + local.exercises.length + local.sports.length;
-  const localActs = local.sports.map(sp => makeActivity({key:sp.key, name:sp.name, entry:sp.entry, date, time:nowTime(), qa:[]}, sp.res));
   if (needAI) { setStatus(S.photo ? 'Looking at your photo…' : nLocal ? `Found ${nLocal} in the built-in tables; reading the rest…` : 'Reading your entry…'); render(); }
   try {
     let r = {foods:[], supplements:[], activities:[], gym_recovery:null, exercises:[], water_ml:0, body_weight_kg:null, health:null, notes:''};
@@ -692,6 +699,10 @@ async function submitLog(){
     }
     const aiFoods = r.foods.length;
     r.foods = [...local.foods, ...r.foods]; r.water_ml = (r.water_ml||0) + local.water;
+    // Activities the AI picked out (from a photo or a long entry): use the Compendium when it knows the sport.
+    const aiActs = []; r.activities = r.activities.filter(a => { const sp = sportFromText(a.entry || a.sport, date) || sportFromText(a.entry || '', date, sportKey(a.sport));
+      if (!sp) return true; aiActs.push(makeActivity({key:sp.key, name:sp.name, entry:a.entry||a.sport, date, time:nowTime(), qa:[]}, sp.res)); return false; });
+    localActs.push(...aiActs);
     r.exercises = [...local.exercises, ...r.exercises]; r.sportsLocal = localActs;
     if (local.exercises.length) r.gym_recovery = Gym.recovery(r.exercises) || r.gym_recovery;
     if (!r.foods.length && !r.exercises.length && !r.water_ml && !r.body_weight_kg && !r.health && !r.supplements.length && !r.activities.length && !localActs.length) {
@@ -888,63 +899,45 @@ function makeActivity(it, res){
     assumptions:String(res?.assumptions||'').slice(0,240), qa:it.qa, time:it.time, ...(res?.local?{local:true}:{})};
   return act;
 }
-/* ---------- sports without AI: "badminton 1 hour", "ran 5 km in 30 min" ----------
-   Compendium of Physical Activities METs for light / usual / hard play; words like
-   "casual" or "competitive", and the sport profile, pick the level. Anything with more
-   detail (overs bowled, scores…) goes to the AI coach instead. */
-const SPORT_DEF = [
-  ['table-tennis','Table tennis',/\b(table tennis|ping ?pong)\b/,[3,4,5.5]],
-  ['badminton','Badminton',/\b(badminton|shuttle)\b/,[4.5,5.5,7]],
-  ['cricket','Cricket',/\b(cricket)\b/,[3.5,4.8,6]],
-  ['football','Football',/\b(football|soccer|futsal)\b/,[5,7,10]],
-  ['tennis','Tennis',/\b(tennis)\b/,[5,7.3,8]],
-  ['volleyball','Volleyball',/\b(volleyball)\b/,[3,4,6]],
-  ['basketball','Basketball',/\b(basketball)\b/,[4.5,6.5,8]],
-  ['squash','Squash',/\b(squash)\b/,[7.3,9,12]],
-  ['running','Running',/\b(run|running|ran|jog|jogging|jogged)\b/,[7,9.8,11.5]],
-  ['walking','Walking',/\b(walk|walked|walking|stroll)\b/,[3,3.5,4.5]],
-  ['cycling','Cycling',/\b(cycling|cycled|bike ride|biking|rode)\b/,[5.8,7.5,10]],
-  ['swimming','Swimming',/\b(swim|swimming|swam)\b/,[5.8,7,9.8]],
-  ['yoga','Yoga',/\b(yoga)\b/,[2.3,2.5,4]],
-  ['hiking','Hiking',/\b(hike|hiking|hiked|trek|trekking)\b/,[5,6,7.8]],
-  ['dance','Dance',/\b(dance|dancing|zumba)\b/,[5,6.5,8]],
-  ['boxing','Boxing',/\b(boxing|kickboxing)\b/,[5.5,7.8,12]],
-];
-const SPORT_FILLER = new Set('i played play playing did do went go for about around approx a an the of with my friends friend session sessions game games today evening morning night afternoon outdoor indoor and some in at hour hours hr hrs h min mins minute minutes m km k half total'.split(' '));
-const SPORT_LEVEL = [[/\b(casual|light|easy|relaxed|slow|warm ?up|leisurely|gentle)\b/,0],[/\b(competitive|intense|hard|fast|tournament|match|singles|sprints?|vigorous|power)\b/,2],[/\b(doubles|practice|nets|moderate|normal|regular)\b/,1]];
-function sportFromText(text, date){
-  const t = String(text||'').toLowerCase().replace(/[.,!]/g,' ').replace(/\s+/g,' ').trim();
-  const def = SPORT_DEF.find(d => d[2].test(t)); if (!def) return null;
-  let min = 0, km = null;
-  const h = t.match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours)\b/); if (h) min += +h[1]*60;
-  const m = t.match(/(\d+)\s*(m|min|mins|minute|minutes)\b/); if (m) min += +m[1];
-  if (!min && /\b(an|one) hour\b/.test(t)) min = 60; if (/\bhalf an hour\b/.test(t)) min = 30; if (/\b(an|one) and a half hours?\b/.test(t)) min = 90;
-  const d = t.match(/(\d+(?:\.\d+)?)\s*(km|k)\b/); if (d) km = +d[1];
-  if (!(min > 0) || min > 600) return null;
-  // Anything else in the entry (overs, runs, scores, places…) is detail for the AI coach.
-  let rest = t.replace(def[2], ' ').replace(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|km|k)\b/g, ' ').replace(/\bhalf an hour\b|\b(an|one) hour\b/g,' ');
-  for (const [re] of SPORT_LEVEL) rest = rest.replace(re, ' ');
-  if (rest.split(' ').some(w => w && !SPORT_FILLER.has(w))) return null;
-  let lvl = 1; for (const [re, l] of SPORT_LEVEL) if (re.test(t)) { lvl = l; break; }
-  const prof1 = ((prof().sports||{})[def[0]]||{}).answers||[];
-  if (lvl===1 && prof1.some(a => /singles|competitive|tournament|advanced/i.test(String(a.a||'')))) lvl = 2;
-  let met = def[3][lvl];
-  // With a distance, pace sets the effort for running, walking and cycling.
-  if (km && ['running','walking','cycling'].includes(def[0])) { const kmh = km/(min/60);
-    met = def[0]==='running' ? Math.min(16, Math.max(6, kmh*1.0)) : def[0]==='walking' ? (kmh<4?3:kmh<5.5?3.5:kmh<6.5?4.3:5) : (kmh<16?5.8:kmh<19?6.8:kmh<22?8:10); }
-  const lvlWord = ['light','moderate','hard'][lvl];
-  const hours = met >= 7 && min >= 60 ? 36 : met >= 5 && min >= 45 ? 24 : 12;
-  return {key:def[0], name:def[1], minutes:min, res:{local:true, title:def[1], summary:`${n0(min)} min${km?`, ${n1(km)} km`:''}, ${lvlWord} effort`, minutes:min,
-    components:[{part:`${def[1]}, ${lvlWord}`, minutes:min, met}], rpe:[4,6,8][lvl],
-    recovery:{hours, level:hours>=36?'hard':hours>=24?'moderate':'light', summary:`About ${hours} hours before another hard ${def[1].toLowerCase()} session.`, tips:['Drink water with a pinch of salt if you sweated a lot.','Eat a meal with protein and carbs within a couple of hours.']},
-    assumptions:`Estimated without AI from typical ${lvlWord} ${def[1].toLowerCase()} (MET ${n1(met)}). Add words like casual, singles or competitive to adjust.`}};
+/* ---------- sports without AI (sports.js + data/activities.json) ----------
+   The 2024 Adult Compendium of Physical Activities gives each activity a MET. Calories:
+   MET × weight × time, minus what you'd have burned resting anyway (your BMR, from height,
+   weight, age and sex), because resting is already counted in your maintenance. */
+let actsP = null;
+const loadActs = () => actsP ||= fetch(`data/activities.json?v=${DATA_VER}`).then(r => r.ok ? r.json() : null).then(t => { if (t) Sports.setTable(t); else actsP = null; }).catch(() => { actsP = null; });
+function sportProfile(key){
+  const ans = ((prof().sports||{})[key]||{}).answers||[];
+  const len = ans.find(a => /^(length|session|nets_min)$/.test(a.id) && Number(a.a) > 0);
+  return {text: ans.map(a => String(a.a||'')).join(' '), minutes: len ? Math.min(Number(len.a), 480) : 0};
+}
+function sportFromText(text, date, famKey){
+  if (typeof Sports === 'undefined' || !Sports.ready()) return null;
+  let sp = Sports.read(text);
+  if (!sp && famKey) { const f = Sports.family(famKey); if (f) sp = Sports.read(`${f[1]} session ${text}`); }
+  if (!sp) return null;
+  sp = Sports.read(sp.text, {profile: sportProfile(sp.key)}) || sp;
+  const hours = sp.met >= 7 && sp.minutes >= 60 ? 36 : sp.met >= 5 && sp.minutes >= 45 ? 24 : 12;
+  const rpe = sp.met < 3 ? 3 : sp.met < 4.5 ? 4 : sp.met < 6 ? 5 : sp.met < 8 ? 6 : sp.met < 10 ? 7 : 8;
+  return {key:sp.key, name:sp.name, minutes:sp.minutes, res:{local:true, title:sp.name, summary:`${n0(sp.minutes)} min${sp.km?`, ${n1(sp.km)} km`:''}, ${sp.level} effort`, minutes:sp.minutes,
+    components:[{part:sp.desc, minutes:sp.minutes, met:sp.met}], rpe, stats:sp.stats,
+    recovery:{hours, level:hours>=36?'hard':hours>=24?'moderate':'light', summary:`About ${hours} hours before another hard ${sp.name.toLowerCase()} session.`, tips:['Drink water with a pinch of salt if you sweated a lot.','Eat a meal with protein and carbs within a couple of hours.']},
+    assumptions:`${sp.assumed ? sp.assumed + ' ' : ''}Compendium ${sp.code}: ${sp.desc} (MET ${n1(sp.met)}). Add words like casual, singles, competitive or a distance to adjust.`}};
+}
+/* About how much a sport burns in an hour for this person, over resting. */
+function sportKcalPerHour(key, date){
+  if (typeof Sports === 'undefined' || !Sports.ready()) return null;
+  const f = Sports.family(key); if (!f) return null;
+  const sp = Sports.read(`${f[1]} 60 min`, {profile: sportProfile(key)}); if (!sp) return null;
+  const W = who(date||localDate());
+  return {kcal:Math.round(Calc.netKcalFromMet(sp.met, W.kg, 60, W.bmrKcal).net), met:sp.met, desc:sp.desc};
 }
 function queueCard(){
   const it = S.queue[0]; if (!it) return '';
   if (S.qBusy) return `<div class="qcard"><div class="qhead">${esc(S.qStatus||'Working…')}</div></div>`;
-  if (it.type==='coach' && it.failed) { const est = sportFromText(it.entry.replace(/\b(bowled|faced|batted|overs?|balls?|runs?|wickets?|scored?|won|lost)\b[^,]*/gi,' '), it.date) || (sportFromText(`${it.name} ${(it.entry.match(/\d+(?:\.\d+)?\s*(?:h|hr|hrs|hours?|m|mins?|minutes?)\b/gi)||[]).join(' ')}`, it.date));
-    return `<div class="qcard"><div class="qhead">${esc(it.name)}</div><div class="status err">${esc(S.qStatus)}</div>
-    <div class="row"><button class="btn ghost sm" data-action="qDiscard">Discard</button>${est?'<button class="btn ghost sm" data-action="qLocal">Log an estimate without AI</button>':''}<span class="spacer"></span><button class="btn sm" data-action="qRetry">Try again</button></div></div>`; }
+  if (it.type==='coach' && it.failed) { const est = sportFromText(it.entry, it.date, sportKey(it.name));
+    const pick = !est && typeof Sports!=='undefined' && Sports.ready() ? `<label class="q"><span class="qt">Not in the activity table. Log it as the closest one:</span><select id="qSimilar">${Sports.families().map(f=>`<option value="${f.key}">${esc(f.name)}</option>`).join('')}</select></label>` : '';
+    return `<div class="qcard"><div class="qhead">${esc(it.name)}</div><div class="status err">${esc(S.qStatus)}</div>${pick}
+    <div class="row"><button class="btn ghost sm" data-action="qDiscard">Discard</button>${est||pick?`<button class="btn ghost sm" data-action="qLocal">${est?'Log an estimate without AI':'Log as this activity'}</button>`:''}<span class="spacer"></span><button class="btn sm" data-action="qRetry">Try again</button></div></div>`; }
   if (it.type==='profile') return `<div class="qcard"><div class="qhead">${it.isNew?`New sport: ${esc(it.name)}. Tell me how you play and I’ll remember it.`:`Update how you play ${esc(it.name)}`}</div>
     <div class="qs">${qHtml(it.questions||[], it.answers, 'q')}</div>
     <div class="row"><button class="btn ghost sm" data-action="qSkipProfile">Skip for now</button><span class="spacer"></span><button class="btn sm" data-action="qSaveProfile">Save${S.queue[1]?' and continue':''}</button></div></div>`;
@@ -1095,7 +1088,24 @@ function sportsProfileHtml(){
   const sp = prof().sports||{};
   const rows = Object.entries(sp).map(([k,v]) => `<div class="item"><div><div class="nm">${esc(v.name||sportName(k))}</div><div class="sub">${esc((v.answers||[]).filter(a=>a.a!==''&&a.a!=null).map(a=>a.a).join(' · ')||'No details yet')}</div><div class="sub">Updated ${esc(v.updated?fmtDate(v.updated,{day:'numeric',month:'short',year:'numeric'}):'—')}</div></div><span></span>
     <div class="acts"><button data-action="updSport" data-key="${esc(k)}">Update</button><button data-action="rmSport" data-key="${esc(k)}" aria-label="Remove ${esc(v.name)}">✕</button></div></div>`).join('');
-  return `${rows || '<div class="muted small">No sports set up yet.</div>'}<div class="row"><button class="btn ghost sm" data-action="startSetup" data-step="sports">Add or change sports</button><button class="btn ghost sm" data-action="startSetup" data-step="about">Redo full setup</button></div>`;
+  return `${rows || '<div class="muted small">No sports set up yet.</div>'}<div class="row"><button class="btn ghost sm" data-action="startSetup" data-step="sports">Add or change sports</button><button class="btn ghost sm" data-action="startSetup" data-step="about">Redo full setup</button></div>${kcalTableHtml()}`;
+}
+/* Calories an hour for this person, from the Compendium: light / usual / hard rows. */
+function kcalTableHtml(){
+  if (typeof Sports === 'undefined' || !Sports.ready()) { loadActs().then(() => { if (S.view==='profile') render(); }); return ''; }
+  const W = who(localDate()); if (!(W.kg > 0)) return '';
+  const mine = Object.keys(prof().sports||{});
+  const keys = [...new Set([...mine, 'badminton','cricket','running','swimming','tennis','football','cycling','walking','table-tennis','yoga'])].filter(k => Sports.family(k));
+  const kc = t => { const sp = Sports.read(t); return sp ? Math.round(Calc.netKcalFromMet(sp.met, W.kg, 60, W.bmrKcal).net) : null; };
+  const cell = v => `<td class="num">${v==null?'—':n0(v)}</td>`;
+  // Pace sports by speed (km in an hour); the rest by casual / usual / competitive play.
+  const PACE = {running:[8,10,12], jogging:[7,8,9], walking:[4,5,6.5], cycling:[15,20,25]};
+  const rows = keys.map(k => { const n = Sports.family(k)[1];
+    const [lo, mid, hi] = PACE[k] ? PACE[k].map(v => kc(`${n} ${v} km in 60 min`)) : k==='swimming' ? ['swimming leisurely 60 min','swimming 60 min','swimming laps fast 60 min'].map(kc) : [`${n} casual 60 min`, `${n} 60 min`, `${n} competitive 60 min`].map(kc);
+    return `<tr><td>${esc(n)}</td>${cell(lo===mid?null:lo)}${cell(mid)}${cell(hi===mid?null:hi)}</tr>`; }).join('');
+  return `<details class="howfold" style="margin-top:12px"><summary>Calories an hour for you</summary>
+    <table class="ktab"><thead><tr><th>Activity</th><th class="num">Casual</th><th class="num">Usual</th><th class="num">Hard</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="muted small">A dash means the Compendium has one value for that effort, so it’s the same as Usual. Running, walking and cycling columns are 8 / 10 / 12, 4 / 5 / 6.5 and 15 / 20 / 25 km/h. kcal per hour on top of resting, for ${n1(W.kg)} kg${W.cm?`, ${n0(W.cm)} cm`:''}${W.age?`, ${W.age} years`:''}. From the 2024 Adult Compendium of Physical Activities: MET × your weight × time, minus your own resting burn (from your height, weight, age and sex). Log a distance and your pace is used.</div></details>`;
 }
 
 
@@ -1910,6 +1920,7 @@ const libCount = () => typeof Gym==='undefined' ? 0 : Gym.EXERCISES.length + Gym
 function sourcesHtml(){
   return `<ul class="tips">
     <li><b>Foods:</b> MaxxTempo’s table (IFCT 2017 and USDA averages); Indian recipes from the <a href="https://www.anuvaad.org.in/indian-nutrient-databank/" target="_blank" rel="noopener">Indian Nutrient Databank (INDB)</a>, Vijayakumar et al. 2024, CC BY 4.0; <a href="https://fdc.nal.usda.gov" target="_blank" rel="noopener">USDA FoodData Central</a> SR Legacy, public domain.</li>
+    <li><b>Sports and activities:</b> METs from the <a href="https://pacompendium.com" target="_blank" rel="noopener">2024 Adult Compendium of Physical Activities</a> (Herrmann, Willis, Ainsworth et al., <i>J Sport Health Sci</i> 2024), free to use.</li>
     <li><b>Packaged foods:</b> barcode lookups from <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, © Open Food Facts contributors, <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>. Scanning uses <a href="https://github.com/zxing-js/browser" target="_blank" rel="noopener">ZXing</a> (MIT / Apache-2.0).</li>
     <li><b>Exercises:</b> <a href="https://github.com/yuhonas/free-exercise-db" target="_blank" rel="noopener">free-exercise-db</a> (public domain); <a href="https://wger.de" target="_blank" rel="noopener">wger</a> (CC-BY-SA, authors listed on each exercise); <a href="https://oss.exercisedb.dev" target="_blank" rel="noopener">ExerciseDB</a> free version (non-commercial, animations from ExerciseDB).</li>
   </ul><div class="muted small">All free, with no accounts or keys. Food and exercise data is stored in the app, so it keeps working even if a source goes offline; only barcode lookups and exercise pictures need the internet.</div>`;
@@ -1972,7 +1983,7 @@ const DATA_VER = 1;
 async function loadData(){
   const get = f => fetch(`data/${f}.json?v=${DATA_VER}`).then(r => r.ok ? r.json() : null).catch(() => null);
   const [free, wger, edb, indb] = await Promise.all([get('ex-free'), get('ex-wger'), get('ex-edb'), get('indb')]);
-  Gym.setLibraries([free, wger, edb]); S.libsReady = true;
+  Gym.setLibraries([free, wger, edb]); S.libsReady = true; loadActs();
   if (indb && indb.items?.length) { S.libFoods = indb.items.map(r=>rowToFood(r,'indb')); S.indbBuiltIn = true; S.myFoodsVer=(S.myFoodsVer||0)+1; }
   render();
 }
@@ -2749,8 +2760,10 @@ document.addEventListener('click', ev => {
     case 'faceIdSignIn': authFaceId(); break;
     case 'faceIdSetup': setupFaceId(); break;
     case 'howto': openHowto(b.dataset.name||''); break;
-    case 'qLocal': { const it = S.queue[0]; if (!it) break; const est = sportFromText(it.entry.replace(/\b(bowled|faced|batted|overs?|balls?|runs?|wickets?|scored?|won|lost)\b[^,]*/gi,' '), it.date) || sportFromText(`${it.name} ${(it.entry.match(/\d+(?:\.\d+)?\s*(?:h|hr|hrs|hours?|m|mins?|minutes?)\b/gi)||[]).join(' ')}`, it.date);
-      if (!est) break; S.queue.shift(); saveActivity(it, est.res).then(() => { render(); if (S.queue.length) runQueue(); }); break; }
+    case 'qLocal': { const it = S.queue[0]; if (!it) break; const sim = $('#qSimilar')?.value;
+      const est = sportFromText(it.entry, it.date, sportKey(it.name)) || (sim ? sportFromText(it.entry, it.date, sim) : null);
+      if (!est) break; if (!sportFromText(it.entry, it.date, sportKey(it.name))) { est.res.title = it.name; est.res.assumptions = `Estimated like ${est.name.toLowerCase()}. ` + est.res.assumptions; }
+      S.queue.shift(); saveActivity(it, est.res).then(() => { render(); if (S.queue.length) runQueue(); }); break; }
     case 'editSupp': openSuppEdit(b.dataset.id||''); break;
     case 'restSet': startRest(+b.dataset.s); break;
     case 'restStop': stopRest(); break;

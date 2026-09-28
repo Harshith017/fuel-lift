@@ -9,6 +9,7 @@ MaxxTempo's code is separate from the data below. Each file in `data/` comes fro
 | `data/ex-edb.json` | [ExerciseDB free version](https://oss.exercisedb.dev) | Free for non-commercial use with attribution | Credit ExerciseDB; don't use it commercially. Animations are loaded from ExerciseDB's own site |
 | `data/indb.json` | [Indian Nutrient Databank (INDB)](https://www.anuvaad.org.in/indian-nutrient-databank/), Vijayakumar et al., *Current Developments in Nutrition* 2024 | CC BY 4.0 | Credit INDB |
 | `data/usda.json` | [USDA FoodData Central](https://fdc.nal.usda.gov), SR Legacy (April 2018) | CC0 1.0 (public domain) | Nothing (citation appreciated) |
+| `data/activities.json` | [2024 Adult Compendium of Physical Activities](https://pacompendium.com), Herrmann SD, Willis EA, Ainsworth BE, et al., *J Sport Health Sci* 2024;13:6–12 | Free to use, including commercially | Cite the Compendium |
 | barcode lookups (live, not stored here) | [Open Food Facts](https://world.openfoodfacts.org) | Database ODbL, contents DbCL | Credit Open Food Facts with a link; a food saved to your own list is your copy |
 | barcode reader (loaded from jsDelivr) | [ZXing for the browser](https://github.com/zxing-js/browser) | Apache-2.0 | Nothing extra |
 
