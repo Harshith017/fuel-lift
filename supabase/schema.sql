@@ -260,3 +260,31 @@ revoke all on public.health_attempts from anon, authenticated;
 -- 10. Speed: indexes for the foreign keys the advisor flagged.
 create index if not exists health_attempts_user on public.health_attempts (user_id);
 create index if not exists webauthn_challenges_user on public.webauthn_challenges (user_id);
+
+-- 11. Joining without email (supabase/functions/access).
+-- A new person types their email; the function creates the account (no
+-- password) and the phone that asked keeps a claim key, stored here only as a
+-- SHA-256 hash. Once the owner approves, that phone is signed in and the claim
+-- is deleted. Only the function reads or writes this table.
+create table if not exists public.access_claims (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  key_hash   text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.access_claims enable row level security;
+revoke all on public.access_claims from anon, authenticated;
+create index if not exists access_claims_created on public.access_claims (created_at);
+-- What the function needs to know about an email, without exposing auth.users.
+create or replace function public.access_account_state(p_email text)
+returns table (user_id uuid, has_password boolean, has_passkey boolean, status text, is_admin boolean)
+language sql stable security definer set search_path = public, auth as $$
+  select u.id,
+         coalesce(u.encrypted_password, '') <> '',
+         exists (select 1 from public.passkeys k where k.user_id = u.id),
+         m.status, coalesce(m.is_admin, false)
+  from auth.users u left join public.members m on m.user_id = u.id
+  where lower(u.email) = lower(p_email)
+  limit 1;
+$$;
+revoke all on function public.access_account_state(text) from public, anon, authenticated;
+grant execute on function public.access_account_state(text) to service_role;
