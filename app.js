@@ -205,7 +205,7 @@ function dayTotals(day){
   MICROS.forEach(m => t.micros[m.key]=0);
   for (const sp of day.supplements||[]) for (const m of MICROS) t.micros[m.key]+= (sp.micros&&sp.micros[m.key])||0;
   for (const f of day.foods||[]) {
-    t.kcal+=f.kcal||0; t.protein+=f.protein||0; t.carbs+=f.carbs||0; t.fat+=f.fat||0; t.fiber+=f.fiber||0; t.sugar+=f.sugar||0;
+    t.kcal+=f.kcal||0; t.protein+=f.protein||0; t.carbs+=f.carbs||0; t.fat+=f.fat||0; t.fiber+=f.fiber||0; t.sugar+=addedSugar(f); t.sugar_all=(t.sugar_all||0)+(f.sugar||0);
     for (const m of MICROS) t.micros[m.key]+= (f.micros&&f.micros[m.key])||0;
   }
   t.alcohol = (day.foods||[]).reduce((s,f)=>s+(f.alcohol||0),0);
@@ -346,7 +346,7 @@ function buildPrompt(text, hasPhoto){
   const W = who(S.date);
   return `You log food, water, supplements, training and health data for one person in India. Date ${S.date}, entry made at ${nowTime()}. Person: ${p.sex}, ${W.age} y, ${n1(W.kg)} kg, ${W.cm} cm.
 Read the entry${hasPhoto?' and the attached photo of the food':''} and reply with ONLY one JSON object in exactly this shape:
-{"foods":[{"name":"Paneer bhurji","quantity":"150 g","grams":150,"meal":"lunch","kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"sugar_g":0,"alcohol_g":0,${microSpec},"confidence":"high"}],
+{"foods":[{"name":"Paneer bhurji","quantity":"150 g","grams":150,"meal":"lunch","kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"sugar_g":0,"added_sugar_g":0,"alcohol_g":0,${microSpec},"confidence":"high"}],
 "water_ml":0,
 "supplements":[{"name":"Vitamin D3","dose":"60,000 IU",${microSpec}}],
 "activities":[{"sport":"Cricket","entry":"played a T20 match, bowled 4 overs"}],
@@ -358,6 +358,7 @@ Read the entry${hasPhoto?' and the attached photo of the food':''} and reply wit
 Rules:
 - One entry per distinct food. Every nutrient number is the TOTAL for that portion, not per 100 g. Use realistic values from standard food composition data (IFCT 2017 for Indian foods, USDA otherwise).
 - Check each food: kcal must match 4 × protein + 4 × carbs + 9 × fat + 7 × alcohol within about 10%. Alcoholic drinks: put the grams of alcohol in alcohol_g (a 330 ml beer at 5% has about 13 g).
+- sugar_g is all sugars. added_sugar_g is only sugar that was added: sugar, jaggery, honey, syrups, sweets and desserts, ice cream, cakes, biscuits, chocolate, sweetened drinks, fruit juices and sweetened milk drinks, and dates, raisins or grapes used to sweeten a dish. Sugar naturally in whole fruit, vegetables, plain milk, plain curd, eggs, rotis, rice, dal, meat and nuts is 0 added sugar.
 - Weights the person gives are as eaten (cooked) unless they say raw, dry or uncooked.
 - No weight given: assume a typical Indian home portion (1 roti ≈ 40 g, 1 katori dal ≈ 150 g, 1 cup cooked rice ≈ 160 g, 1 egg ≈ 50 g) and set confidence "medium".
 - From a photo: name each item, estimate the portion from visual cues (a dinner plate is about 25 cm), set confidence "medium" or "low".
@@ -382,7 +383,7 @@ function normalize(res, date){
     const meal = MEALS.includes(f.meal) ? f.meal : guessMeal();
     const x = {id:uid(), name:titleCase(f.name)||'Food', quantity:String(f.quantity||'').slice(0,40), grams:num(f.grams,5000), meal,
       time:nowTime(), kcal:num(f.kcal,5000), protein:num(f.protein_g,500), carbs:num(f.carbs_g,1000), fat:num(f.fat_g,500),
-      fiber:num(f.fiber_g,200), sugar:num(f.sugar_g,500), alcohol:num(f.alcohol_g,300), micros, confidence:['high','medium','low'].includes(f.confidence)?f.confidence:'medium', source:S.photo?'photo':'text'};
+      fiber:num(f.fiber_g,200), sugar:num(f.sugar_g,500), added_sugar: f.added_sugar_g != null ? num(f.added_sugar_g,500) : (sweetName(f.name) ? num(f.sugar_g,500) : 0), alcohol:num(f.alcohol_g,300), micros, confidence:['high','medium','low'].includes(f.confidence)?f.confidence:'medium', source:S.photo?'photo':'text'};
     // Flag estimates whose calories don't add up from their macros.
     if (x.kcal>30 && Calc.atwaterMismatch(x.kcal, x.protein, x.carbs, x.fat, x.fiber, x.alcohol) > 0.15) x.check = true;
     return x;
@@ -477,7 +478,30 @@ async function toJpeg(file){
 }
 
 /* ---------- built-in food table (foods.js, checked by calc.test.js) ---------- */
-const { FOOD_MICRO_ORDER, FOOD_ROWS, FOOD_ALCOHOL } = window;
+const { FOOD_MICRO_ORDER, FOOD_ROWS, FOOD_ALCOHOL, FOOD_ADDED_SUGAR } = window;
+/* Only added sugar counts toward the sugar limit: sugar, jaggery, honey, syrups, sweets,
+   desserts, sweetened drinks and juices, and dates or raisins used to sweeten a dish.
+   Sugar that is naturally in fruit, vegetables, milk, curd, eggs, rotis or dal doesn't. */
+const SWEET_RE = /\b(sugar|sweet(?!\s*(potato|corn))|sweetened|dessert|ice ?cream|kulfi|cake|pastry|cookies?|biscuits?|brownie|muffin|dough?nut|chocolate|choco|candy|toffee|jam|jelly|honey|jaggery|gur|syrup|halwa|kheer|payasam|gulab|jamun|jalebi|lad(d)?oo|laddu|barfi|burfi|rasgulla|rasmalai|mithai|peda|sandesh|soda|cola|coke|pepsi|sprite|fanta|soft drink|energy drink|juice|milkshake|(mango|banana|strawberry|chikoo|chocolate|oreo|kitkat|dates?|butterscotch|vanilla) shake|smoothie|frooti|maaza|mango lassi|sweet lassi|cold coffee|frappe|mocha|cereal|granola|muesli|protein bar|pie|tart|waffle|pancakes?|custard|pudding|mousse|cheesecake|nutella|ketchup|shrikhand|basundi|rabri|payasa|modak|chikki|dates? (shake|smoothie|balls?|bar|roll|ladoo|halwa)|raisin)\b/i;
+const NOT_SWEET_RE = /\b(sugar[- ]?free|no (added )?sugar|unsweetened|zero|diet)\b/i;
+const sweetName = n => SWEET_RE.test(n||'') && !NOT_SWEET_RE.test(n||'');
+// Added sugar per 100 g of a food from any source.
+function addedPer100(f){
+  const per = f.per || {};
+  if (per.added_sugar != null) return per.added_sugar;
+  if (f.src==='indb') return per.sugar || 0;                                  // INDB records free (added) sugar
+  if (FOOD_ADDED_SUGAR && f.name in FOOD_ADDED_SUGAR) return FOOD_ADDED_SUGAR[f.name];
+  if (f.src==='usda') return (/^(Sweets|Baked Products|Breakfast Cereals|Snacks|Fast Foods|Beverages)$/.test(f.cat||'') || sweetName(f.name) || sweetName((f.aliases||[])[0])) && !NOT_SWEET_RE.test(f.name) ? (per.sugar||0) : 0;
+  if (f.src==='off') return per.sugar || 0;                                    // set from the label in offToFood
+  if (!f.src || f.src==='builtin') return 0;                                   // built-in foods not in the table have none
+  return sweetName(f.name) ? (per.sugar||0) : 0;
+}
+// Added sugar of a logged food; older entries without it are judged by name.
+function addedSugar(f){
+  if (f.added_sugar != null) return f.added_sugar;
+  if (FOOD_ADDED_SUGAR && f.name in FOOD_ADDED_SUGAR) return (FOOD_ADDED_SUGAR[f.name]||0) * (f.grams||0) / 100;
+  return sweetName(f.name) ? (f.sugar||0) : 0;
+}
 const FOODS = FOOD_ROWS.map(r => {
   const [name, aliases, units, kcal, protein, carbs, fat, fiber, sugar, ...m] = r;
   const micros = {}; FOOD_MICRO_ORDER.forEach((k,i)=>micros[k]=m[i]||0);
@@ -614,7 +638,7 @@ function localParse(text, date){
       prev = null; if (r.skip) continue; if (r.water) { water += r.water; continue; }
       const k = r.grams/100, per = r.food.per; const micros={}; for (const m of MICROS) micros[m.key] = (per.micros[m.key]||0)*k;
       foods.push({id:uid(), name:r.food.name, quantity:r.label, grams:Math.round(r.grams), meal, time:nowTime(), kcal:per.kcal*k, protein:per.protein*k, carbs:per.carbs*k, fat:per.fat*k,
-        fiber:per.fiber*k, sugar:per.sugar*k, alcohol:(FOOD_ALCOHOL[r.food.name]||0)*k, micros, confidence:'high', source:r.mine?'my-food':'food-db'});
+        fiber:per.fiber*k, sugar:per.sugar*k, added_sugar:addedPer100(r.mine ? {...r.food, src:'mine'} : r.food)*k, alcohol:(FOOD_ALCOHOL[r.food.name]||0)*k, micros, confidence:'high', source:r.mine?'my-food':'food-db'});
     }
   }
   for (const e of exercises) { delete e.kind; e.source = 'exercise-db'; e.kcal = exerciseKcal(e, date); }
@@ -626,7 +650,7 @@ function saveMyFood(f, extraAlias){
   const k = 100/f.grams; const micros={}; for (const m of MICROS) micros[m.key] = Math.round(((f.micros||{})[m.key]||0)*k*100)/100;
   const prev = (S.myFoods||{})[key];
   const aliases = [...new Set([...(prev?.aliases||[]), ...(extraAlias?[extraAlias]:[])].map(normFood).filter(Boolean))].slice(0,10);
-  const doc = {name:f.name, aliases, units:{serving:Math.round(f.grams)}, per:{kcal:r1(f.kcal*k), protein:r1(f.protein*k), carbs:r1(f.carbs*k), fat:r1(f.fat*k), fiber:r1((f.fiber||0)*k), sugar:r1((f.sugar||0)*k), micros},
+  const doc = {name:f.name, aliases, units:{serving:Math.round(f.grams)}, per:{kcal:r1(f.kcal*k), protein:r1(f.protein*k), carbs:r1(f.carbs*k), fat:r1(f.fat*k), fiber:r1((f.fiber||0)*k), sugar:r1((f.sugar||0)*k), added_sugar:r1(addedSugar(f)*k), micros},
     src:'mine', verified:!!f.verified || !!prev?.verified, updated:Date.now()};
   if (prev && prev.verified && !f.verified) return; // never overwrite a food the person corrected with a fresh estimate
   S.myFoods = {...(S.myFoods||{}), [key]:doc}; S.myFoodsVer=(S.myFoodsVer||0)+1;
@@ -1700,7 +1724,7 @@ function viewToday(){
           ['Protein', t.protein, T.protein, 'g', 'more', 'var(--protein)'],
           ['Fat', t.fat, T.fat, 'g', 'range', 'var(--fat)'],
           ['Fibre', t.fiber, T.fiber, 'g', 'more', 'var(--ink-3)'],
-          ['Sugar', t.sugar, T.sugar, 'g', 'limit', 'var(--ink-3)'],
+          ['Added sugar', t.sugar, T.sugar, 'g', 'limit', 'var(--ink-3)'],
         ];
         return `<div class="nring-top">
           <div class="ringwrap">${rings([{p:P(t.carbs,T.carbs), color:'var(--carbs)'}, {p:P(t.protein,T.protein), color:'var(--protein)'}, {p:P(t.fat,T.fat), color:'var(--fat)'}])}
@@ -1952,7 +1976,7 @@ function openFoodSearch(){
 function foodFromPer(f, grams, label){
   const k = grams/100, per = f.per; const micros = {}; for (const m of MICROS) micros[m.key] = (per.micros[m.key]||0)*k;
   return {id:uid(), name:f.name, quantity:label, grams:Math.round(grams), meal:guessMeal(), time:nowTime(), kcal:per.kcal*k, protein:per.protein*k, carbs:per.carbs*k, fat:per.fat*k,
-    fiber:(per.fiber||0)*k, sugar:(per.sugar||0)*k, alcohol:((f.alcohol ?? FOOD_ALCOHOL[f.name]) || 0)*k, micros, confidence:'high', source:'food-'+(f.src||'db')};
+    fiber:(per.fiber||0)*k, sugar:(per.sugar||0)*k, added_sugar:addedPer100(f)*k, alcohol:((f.alcohol ?? FOOD_ALCOHOL[f.name]) || 0)*k, micros, confidence:'high', source:'food-'+(f.src||'db')};
 }
 function openPortion(f, note){
   if (!f) return;
@@ -2043,7 +2067,10 @@ function offToFood(p, code){
     vitamin_d_mcg:g('vitamin-d')*1e6, vitamin_b12_mcg:g('vitamin-b12')*1e6, folate_mcg:g('folates')*1e6, omega3_g:g('omega-3-fat') };
   const units = {}; const sq = Number(p.serving_quantity); if (sq>0 && sq<2000) units.serving = Math.round(sq);
   const pq = Number(p.product_quantity); if (pq>0 && pq<5000 && pq!==sq) units.packet = Math.round(pq);
-  return {name, aliases:[code], units, per:{kcal, protein:g('proteins'), carbs:g('carbohydrates'), fat:g('fat'), fiber:g('fiber'), sugar:g('sugars'), micros}, alcohol:g('alcohol')*0.789, src:'off', barcode:code};
+  // Added sugar: from the label when given; plain milk, curd, oats, flour, rice, dal, eggs and nuts have none; other packaged foods count all their sugar.
+  const plain = /\b(milk|curd|dahi|yogh?urt|paneer|cheese|egg|oats|atta|flour|rice|dal|lentil|nuts?|almond|peanut|butter|ghee|tofu|soya)\b/i.test(name) && !sweetName(name);
+  const added = n['added-sugars_100g'] != null ? g('added-sugars') : plain ? 0 : g('sugars');
+  return {name, aliases:[code], units, per:{kcal, protein:g('proteins'), carbs:g('carbohydrates'), fat:g('fat'), fiber:g('fiber'), sugar:g('sugars'), added_sugar:added, micros}, alcohol:g('alcohol')*0.789, src:'off', barcode:code};
 }
 
 /* ---------- Trends ---------- */
@@ -2084,7 +2111,7 @@ function viewTrends(){
     ['Protein', r=>r.t&&r.t.kcal ? goalState(r.t.protein, r.T.protein, 'more') : null],
     ['Carbs', r=>r.t&&r.t.kcal ? goalState(r.t.carbs, r.T.carbs, 'range') : null],
     ['Fibre', r=>r.t&&r.t.kcal ? goalState(r.t.fiber, r.T.fiber, 'more') : null],
-    ['Sugar (limit)', r=>r.t&&r.t.kcal ? goalState(r.t.sugar, r.T.sugar, 'limit') : null],
+    ['Added sugar (limit)', r=>r.t&&r.t.kcal ? goalState(r.t.sugar, r.T.sugar, 'limit') : null],
     ['Water', r=>r.t&&r.t.water ? goalState(r.t.water, waterTarget(r.d,r.T), 'more') : null],
     ['Steps', r=>r.d&&r.d.health&&r.d.health.steps ? goalState(r.d.health.steps, goal, 'more') : null],
     ['Sleep 7 h+', r=>r.d&&r.d.health&&r.d.health.sleep_min ? goalState(r.d.health.sleep_min, 420, 'more') : null],
@@ -2403,9 +2430,9 @@ async function exportExcel(){
     const summary=[], food=[], gym=[], sport=[], supps=[], blood=[];
     for (const d of days) {
       const t=dayTotals(d), T=dayTargets(d), H=d.health||{};
-      summary.push({Date:d.date, 'Calories eaten':Math.round(t.kcal), 'Calorie target':Math.round(T.kcal), 'Protein (g)':r1(t.protein), 'Carbs (g)':r1(t.carbs), 'Fat (g)':r1(t.fat), 'Fibre (g)':r1(t.fiber), 'Sugar (g)':r1(t.sugar),
+      summary.push({Date:d.date, 'Calories eaten':Math.round(t.kcal), 'Calorie target':Math.round(T.kcal), 'Protein (g)':r1(t.protein), 'Carbs (g)':r1(t.carbs), 'Fat (g)':r1(t.fat), 'Fibre (g)':r1(t.fiber), 'Added sugar (g)':r1(t.sugar),
         'Water (L)':r1(t.water/1000), 'Burned (kcal)':Math.round(burnedTotal(d).total), 'Training (kcal)':Math.round(t.burned||0), Steps:H.steps||'', 'Sleep (h)':H.sleep_min?r1(H.sleep_min/60):'', 'Weight (kg)':d.weight_kg||''});
-      for (const f of d.foods||[]) food.push({Date:d.date, Meal:f.meal, Time:f.time||'', Food:f.name, Quantity:f.quantity||'', Grams:Math.round(f.grams||0), kcal:Math.round(f.kcal||0), 'Protein (g)':r1(f.protein), 'Carbs (g)':r1(f.carbs), 'Fat (g)':r1(f.fat), 'Fibre (g)':r1(f.fiber), 'Sugar (g)':r1(f.sugar)});
+      for (const f of d.foods||[]) food.push({Date:d.date, Meal:f.meal, Time:f.time||'', Food:f.name, Quantity:f.quantity||'', Grams:Math.round(f.grams||0), kcal:Math.round(f.kcal||0), 'Protein (g)':r1(f.protein), 'Carbs (g)':r1(f.carbs), 'Fat (g)':r1(f.fat), 'Fibre (g)':r1(f.fiber), 'Sugar (g)':r1(f.sugar), 'Added sugar (g)':r1(addedSugar(f))});
       for (const e of d.exercises||[]) { const sets=e.sets||[]; if (!sets.length) gym.push({Date:d.date, Exercise:e.name, 'Muscle group':e.muscle_group||'', Set:'', 'Weight (kg)':'', Reps:'', Minutes:e.duration_min||'', kcal:Math.round(e.kcal||0)});
         sets.forEach((s,i)=>gym.push({Date:d.date, Exercise:e.name, 'Muscle group':e.muscle_group||'', Set:i+1, 'Weight (kg)':s.weight||0, Reps:s.reps||0, Minutes:'', kcal:i===0?Math.round(e.kcal||0):''})); }
       for (const a of d.sports||[]) sport.push({Date:d.date, Activity:actTitle(a), Details:actLine(a), Minutes:Math.round(a.minutes||0), 'Effort (1-10)':a.rpe||'', kcal:Math.round(a.kcal||0)});
@@ -2443,7 +2470,7 @@ function openFoodEdit(id){
     writeDay(S.date, day => { const x = day.foods.find(y=>y.id===id); if (!x) return;
       x.name = $('#ef_name').value.trim()||x.name; x.meal = $('#ef_meal').value;
       if (scale && x.grams>0 && g>0 && g!==x.grams) { const k=g/x.grams;
-        ['kcal','protein','carbs','fat','fiber','sugar'].forEach(key=>x[key]=(x[key]||0)*k);
+        x.added_sugar = addedSugar(x)*k; ['kcal','protein','carbs','fat','fiber','sugar'].forEach(key=>x[key]=(x[key]||0)*k);
         for (const m of MICROS) x.micros[m.key]=(x.micros[m.key]||0)*k;
         x.quantity = `${Math.round(g)} g`;
       } else { x.kcal=num($('#ef_kcal').value,5000); x.protein=num($('#ef_p').value,500); x.carbs=num($('#ef_c').value,1000); x.fat=num($('#ef_f').value,500); if (g!==x.grams && g>0) x.quantity=`${Math.round(g)} g`; }
