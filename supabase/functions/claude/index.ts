@@ -29,6 +29,10 @@ const MODEL_SMART = Deno.env.get("MODEL_SMART") ?? "claude-sonnet-5";
 const MODEL_QUICK = Deno.env.get("MODEL_QUICK") ?? "claude-haiku-4-5";
 const GEMINI_SMART = Deno.env.get("GEMINI_MODEL_SMART") ?? "gemini-3.8-flash";
 const GEMINI_QUICK = Deno.env.get("GEMINI_MODEL_QUICK") ?? "gemini-3.5-flash-lite";
+// Each Gemini model has its own free daily allowance and its own busy spells, so when one is
+// overloaded or used up the next is tried. Newest first; older ones are still good at this.
+const GEMINI_SMART_CHAIN = [GEMINI_SMART, "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash", "gemini-flash-latest"];
+const GEMINI_QUICK_CHAIN = [GEMINI_QUICK, "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-lite-latest"];
 const ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 
 // Which model and how much thinking each job gets. Chosen here, not by the
@@ -72,9 +76,9 @@ function extractJson(text: string): unknown {
 
 // Gemini over REST. Returns the reply text, or throws {status, reason}.
 async function callGemini(model: string, maxTokens: number, prompt: string,
-  images: { media_type: string; data: string }[], documents: { media_type: string; data: string }[]) {
+  images: { media_type: string; data: string }[], documents: { media_type: string; data: string }[], timeoutMs = 40_000) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
+    method: "POST", signal: AbortSignal.timeout(timeoutMs),
     headers: { "x-goog-api-key": GEMINI_KEY!, "Content-Type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM }] },
@@ -94,24 +98,36 @@ async function callGemini(model: string, maxTokens: number, prompt: string,
   return { refused: false, text, model: data.modelVersion ?? model };
 }
 
-// Google's free tier is often "experiencing high demand" (503) or briefly
-// rate-limited. Retry the preferred model once, then try the other one.
+// Google's free tier is often "experiencing high demand" (503), rate-limited (429) or slow.
+// Each model has its own allowance, so try them in turn, each with a time limit, inside the
+// function's own 150 s limit. While this server instance stays warm it remembers which model
+// last answered (tried first) and rests models that were busy (5 min) or used up (6 h).
 const BUSY = new Set([429, 500, 503, 504]);
+const resting = new Map<string, number>(); let lastGood = "";
 async function callGeminiWithFallback(models: string[], maxTokens: number, prompt: string,
   images: { media_type: string; data: string }[], documents: { media_type: string; data: string }[]) {
-  const tries = [models[0], models[0], ...models.slice(1)].filter((m, i, a) => m && (i < 2 || a.indexOf(m) === i));
-  let last: unknown;
+  const now = Date.now(), all = [...new Set(models.filter(Boolean))];
+  const ready = all.filter((m) => (resting.get(m) ?? 0) <= now), tired = all.filter((m) => (resting.get(m) ?? 0) > now);
+  const tries = [...(lastGood && ready.includes(lastGood) ? [lastGood] : []), ...ready.filter((m) => m !== lastGood), ...tired];
+  const start = Date.now(), BUDGET = 110_000;
+  let last: { status?: number; reason?: string } = { status: 503, reason: "no model answered" }, dayLimited = 0;
   for (let i = 0; i < tries.length; i++) {
-    try { return await callGemini(tries[i], maxTokens, prompt, images, documents); }
+    const left = BUDGET - (Date.now() - start); if (left < 6_000) break;
+    try { const out = await callGemini(tries[i], maxTokens, prompt, images, documents, Math.min(25_000, left)); lastGood = tries[i]; resting.delete(tries[i]); return out; }
     catch (e) {
-      last = e;
-      const status = (e as { status?: number })?.status;
-      if (status && !BUSY.has(status)) throw e;
-      console.error("gemini busy", tries[i], status);
-      if (i < tries.length - 1) await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+      const err = e as { status?: number; reason?: string; name?: string };
+      const status = err?.name === "TimeoutError" || err?.name === "AbortError" ? 504 : err?.status;
+      last = { status, reason: err?.reason ?? String(err?.name ?? "") };
+      if (status && !BUSY.has(status) && status !== 404) throw e;          // 404: not available to this key; try the next
+      const day = status === 429 && /per.?day|daily/i.test(err?.reason ?? "");
+      if (day) dayLimited++;
+      resting.set(tries[i], Date.now() + (day || status === 404 ? 6 * 3600e3 : 5 * 60e3));
+      if (lastGood === tries[i]) lastGood = "";
+      console.error("gemini", tries[i], status);
     }
   }
-  throw last;
+  if (dayLimited && dayLimited === tries.length) throw { status: 429, reason: "PerDay: all models" };
+  throw last.status === 429 && !dayLimited ? last : { status: 503, reason: last.reason ?? "" };
 }
 
 Deno.serve(async (req) => {
@@ -173,7 +189,7 @@ Deno.serve(async (req) => {
 
   if (PROVIDER === "gemini") {
     try {
-      const out = await callGeminiWithFallback(tier.smart ? [GEMINI_SMART, GEMINI_QUICK] : [GEMINI_QUICK, GEMINI_SMART], tier.maxTokens, prompt, images, documents);
+      const out = await callGeminiWithFallback(tier.smart ? [...GEMINI_SMART_CHAIN, ...GEMINI_QUICK_CHAIN] : [...GEMINI_QUICK_CHAIN, ...GEMINI_SMART_CHAIN], tier.maxTokens, prompt, images, documents);
       if (out.refused) { await refund(); return fail(422, "refused", { usage }); }
       if (!out.text.trim()) return fail(502, "empty_completion", { usage });
       let json: unknown;

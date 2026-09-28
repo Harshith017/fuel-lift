@@ -630,8 +630,11 @@ function localParse(text, date){
     else { prev = {id:uid(), ...g.exercise, kcal_hint:null, time:nowTime()}; delete prev.kind; exercises.push(prev); prev.kind = g.exercise.kind; }
     return true; };
   // Commas and new lines separate entries; gym sets are read before "and"/"+" split them ("pull ups +10kg 3x8").
+  // Match details ("bowled 6 overs", "won 2 sets") belong with the sport: leave those to the AI coach.
+  const sports = [], sportDetail = /\b(bowl(?:ed|ing)?|overs?|batt(?:ed|ing)|faced|wickets?|innings|scored|goals?|laps?|won|lost)\b/i.test(text);
   for (const chunk of text.split(/\s*(?:,|;|\n)\s*/).map(x=>x.trim()).filter(Boolean)) {
     if (gymHit(chunk)) continue;
+    const sp = sportDetail ? null : sportFromText(chunk, date); if (sp) { sports.push({...sp, entry:chunk}); prev = null; continue; }
     for (const p of chunk.split(/\s*(?:\+|&|\band\b|\bwith\b)\s*/i).map(x=>x.trim()).filter(Boolean)) {
       const r = parsePart(p);
       if (!r) { if (!gymHit(p)) { rest.push(p); prev = null; } continue; }
@@ -642,7 +645,7 @@ function localParse(text, date){
     }
   }
   for (const e of exercises) { delete e.kind; e.source = 'exercise-db'; e.kcal = exerciseKcal(e, date); }
-  return {foods, water, rest, exercises};
+  return {foods, water, rest, exercises, sports};
 }
 function saveMyFood(f, extraAlias){
   if (!S.db || !(f.grams>0) || !f.name) return;
@@ -662,17 +665,20 @@ async function submitLog(){
   const ta = $('#logText'); const text = (ta?.value||'').trim();
   if (!text && !S.photo) { setStatus('Type what you ate, drank or lifted, or add a photo.', true); return; }
   const date = S.date; const p = prof();
-  const local = (text && !S.photo) ? localParse(text, date) : {foods:[], water:0, rest:text?[text]:[], exercises:[]};
+  const local = (text && !S.photo) ? localParse(text, date) : {foods:[], water:0, rest:text?[text]:[], exercises:[], sports:[]};
   const localGym = local.exercises.length ? Gym.recovery(local.exercises) : null;
   const restText = local.rest.join(', ');
   const needAI = !!S.photo || restText.length > 0;
   if (needAI && !S.sample) {
-    if (local.foods.length || local.water || local.exercises.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym}); if ($('#logText')) $('#logText').value = restText; setStatus(`Logged what’s in the built-in tables. AI isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
+    if (local.foods.length || local.water || local.exercises.length || localActs.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym, sportsLocal:localActs}); if ($('#logText')) $('#logText').value = restText; setStatus(`Logged what’s in the built-in tables. AI isn’t set up yet, so this part wasn’t read: “${restText}”.`, true); }
     else setStatus('That isn’t in the built-in food or exercise tables, and AI isn’t set up for this app yet (see SETUP.md).', true);
     return;
   }
   S.busy = true; S.ctl = new AbortController();
-  const nLocal = local.foods.length + local.exercises.length;
+  const slow1 = setTimeout(() => { if (S.busy) setStatus('Google’s AI is slow right now; trying another model…'); }, 12000);
+  const slow2 = setTimeout(() => { if (S.busy) setStatus('Still trying other AI models… You can tap Stop and log it later.'); }, 45000);
+  const nLocal = local.foods.length + local.exercises.length + local.sports.length;
+  const localActs = local.sports.map(sp => makeActivity({key:sp.key, name:sp.name, entry:sp.entry, date, time:nowTime(), qa:[]}, sp.res));
   if (needAI) { setStatus(S.photo ? 'Looking at your photo…' : nLocal ? `Found ${nLocal} in the built-in tables; reading the rest…` : 'Reading your entry…'); render(); }
   try {
     let r = {foods:[], supplements:[], activities:[], gym_recovery:null, exercises:[], water_ml:0, body_weight_kg:null, health:null, notes:''};
@@ -686,9 +692,9 @@ async function submitLog(){
     }
     const aiFoods = r.foods.length;
     r.foods = [...local.foods, ...r.foods]; r.water_ml = (r.water_ml||0) + local.water;
-    r.exercises = [...local.exercises, ...r.exercises];
+    r.exercises = [...local.exercises, ...r.exercises]; r.sportsLocal = localActs;
     if (local.exercises.length) r.gym_recovery = Gym.recovery(r.exercises) || r.gym_recovery;
-    if (!r.foods.length && !r.exercises.length && !r.water_ml && !r.body_weight_kg && !r.health && !r.supplements.length && !r.activities.length) {
+    if (!r.foods.length && !r.exercises.length && !r.water_ml && !r.body_weight_kg && !r.health && !r.supplements.length && !r.activities.length && !localActs.length) {
       setStatus(r.notes || 'Nothing to log was found in that entry.', true);
     } else {
       await saveEntry(date, r);
@@ -696,6 +702,7 @@ async function submitLog(){
       if (r.foods.length) bits.push(`${r.foods.length} food${r.foods.length>1?'s':''} · ${n0(r.foods.reduce((s,f)=>s+f.kcal,0))} kcal`);
       if (r.water_ml) bits.push(`${n0(r.water_ml)} ml water`);
       if (r.exercises.length) bits.push(`${r.exercises.length} exercise${r.exercises.length>1?'s':''}`);
+      for (const a of localActs) bits.push(`${a.title} ${n0(a.minutes)} min · ${n0(a.kcal)} kcal`);
       if (r.body_weight_kg) bits.push(`weight ${n1(r.body_weight_kg)} kg`);
       if (r.supplements.length) bits.push(r.supplements.map(x=>x.name).join(', '));
       if (r.health) bits.push('Health data'+(r.health.steps?` (${n0(r.health.steps)} steps`:' (')+(r.health.sleep_min?`${r.health.steps?', ':''}${fmtSleep(r.health.sleep_min)} sleep`:'')+')');
@@ -710,14 +717,15 @@ async function submitLog(){
     if (e?.code === 'cancelled') setStatus('Stopped. Nothing was logged.');
     else {
       // Keep whatever the food table understood, even when Claude can't be reached.
-      if (local.foods.length || local.water || local.exercises.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym}); if ($('#logText')) $('#logText').value = restText; }
-      setStatus((local.foods.length||local.water||local.exercises.length ? 'Logged what the built-in tables know. ' : '') + (AI_ERR[e?.code] || AI_ERR.unavailable), true);
+      if (local.foods.length || local.water || local.exercises.length || localActs.length) { await saveEntry(date, {foods:local.foods, water_ml:local.water, exercises:local.exercises, gym_recovery:localGym, sportsLocal:localActs}); if ($('#logText')) $('#logText').value = restText; }
+      setStatus((local.foods.length||local.water||local.exercises.length||localActs.length ? 'Logged what the built-in tables know. ' : '') + (AI_ERR[e?.code] || AI_ERR.unavailable), true);
     }
-  } finally { S.busy=false; S.ctl=null; render(); }
+  } finally { clearTimeout(slow1); clearTimeout(slow2); S.busy=false; S.ctl=null; render(); }
   if (S.queue.length) runQueue();
 }
 async function saveEntry(date, r){
   await writeDay(date, d => {
+    if ((r.sportsLocal||[]).length) d.sports = [...(d.sports||[]), ...r.sportsLocal];
     d.foods.push(...(r.foods||[])); d.exercises.push(...(r.exercises||[]));
     if (r.gym_recovery) d.gym_recovery = {...r.gym_recovery, ready_at:new Date(Date.now()+r.gym_recovery.hours*3600e3).toISOString()};
     if (r.water_ml) d.water.push({id:uid(), ml:r.water_ml, time:nowTime()});
@@ -860,6 +868,11 @@ async function runQueue(){
   render();
 }
 async function saveActivity(it, res){
+  const act = makeActivity(it, res);
+  await writeDay(it.date, d => { d.sports = [...(d.sports||[]), act]; });
+  setStatus(`${act.title}: about ${n0(act.kcal)} kcal on top of resting, over ${n0(act.minutes)} min.${act.recovery?` Recovery about ${Math.round(act.recovery.hours)} h.`:''}${act.local?' Estimated without AI.':''}`);
+}
+function makeActivity(it, res){
   const W = who(it.date);
   const comps = (Array.isArray(res?.components)?res.components:[]).slice(0,12).map(c=>({part:String(c.part||'').slice(0,90), minutes:num(c.minutes,600), met:Math.min(Math.max(Number(c.met)||0,1),16)})).filter(c=>c.minutes>0);
   const minutes = comps.reduce((a,c)=>a+c.minutes,0) || num(res?.minutes,1440);
@@ -872,15 +885,66 @@ async function saveActivity(it, res){
   const act = {id:uid(), v:2, key:it.key, sport:it.name, title:String(res?.title||it.name).slice(0,60), summary:String(res?.summary||'').slice(0,200), entry:it.entry,
     minutes:Math.round(minutes), components:comps, kcal, kcal_gross, rpe:Math.min(10,Math.max(1,Math.round(Number(res?.rpe)||5))), stats,
     recovery: hours ? {hours, level:['light','moderate','hard'].includes(rc.level)?rc.level:'moderate', summary:String(rc.summary||'').slice(0,400), tips:(Array.isArray(rc.tips)?rc.tips:[]).slice(0,5).map(x=>String(x).slice(0,200)), ready_at:new Date(base.getTime()+hours*3600e3).toISOString()} : null,
-    assumptions:String(res?.assumptions||'').slice(0,240), qa:it.qa, time:it.time};
-  await writeDay(it.date, d => { d.sports = [...(d.sports||[]), act]; });
-  setStatus(`${act.title}: about ${n0(kcal)} kcal on top of resting, over ${n0(act.minutes)} min.${act.recovery?` Recovery about ${Math.round(act.recovery.hours)} h.`:''}`);
+    assumptions:String(res?.assumptions||'').slice(0,240), qa:it.qa, time:it.time, ...(res?.local?{local:true}:{})};
+  return act;
+}
+/* ---------- sports without AI: "badminton 1 hour", "ran 5 km in 30 min" ----------
+   Compendium of Physical Activities METs for light / usual / hard play; words like
+   "casual" or "competitive", and the sport profile, pick the level. Anything with more
+   detail (overs bowled, scores…) goes to the AI coach instead. */
+const SPORT_DEF = [
+  ['table-tennis','Table tennis',/\b(table tennis|ping ?pong)\b/,[3,4,5.5]],
+  ['badminton','Badminton',/\b(badminton|shuttle)\b/,[4.5,5.5,7]],
+  ['cricket','Cricket',/\b(cricket)\b/,[3.5,4.8,6]],
+  ['football','Football',/\b(football|soccer|futsal)\b/,[5,7,10]],
+  ['tennis','Tennis',/\b(tennis)\b/,[5,7.3,8]],
+  ['volleyball','Volleyball',/\b(volleyball)\b/,[3,4,6]],
+  ['basketball','Basketball',/\b(basketball)\b/,[4.5,6.5,8]],
+  ['squash','Squash',/\b(squash)\b/,[7.3,9,12]],
+  ['running','Running',/\b(run|running|ran|jog|jogging|jogged)\b/,[7,9.8,11.5]],
+  ['walking','Walking',/\b(walk|walked|walking|stroll)\b/,[3,3.5,4.5]],
+  ['cycling','Cycling',/\b(cycling|cycled|bike ride|biking|rode)\b/,[5.8,7.5,10]],
+  ['swimming','Swimming',/\b(swim|swimming|swam)\b/,[5.8,7,9.8]],
+  ['yoga','Yoga',/\b(yoga)\b/,[2.3,2.5,4]],
+  ['hiking','Hiking',/\b(hike|hiking|hiked|trek|trekking)\b/,[5,6,7.8]],
+  ['dance','Dance',/\b(dance|dancing|zumba)\b/,[5,6.5,8]],
+  ['boxing','Boxing',/\b(boxing|kickboxing)\b/,[5.5,7.8,12]],
+];
+const SPORT_FILLER = new Set('i played play playing did do went go for about around approx a an the of with my friends friend session sessions game games today evening morning night afternoon outdoor indoor and some in at hour hours hr hrs h min mins minute minutes m km k half total'.split(' '));
+const SPORT_LEVEL = [[/\b(casual|light|easy|relaxed|slow|warm ?up|leisurely|gentle)\b/,0],[/\b(competitive|intense|hard|fast|tournament|match|singles|sprints?|vigorous|power)\b/,2],[/\b(doubles|practice|nets|moderate|normal|regular)\b/,1]];
+function sportFromText(text, date){
+  const t = String(text||'').toLowerCase().replace(/[.,!]/g,' ').replace(/\s+/g,' ').trim();
+  const def = SPORT_DEF.find(d => d[2].test(t)); if (!def) return null;
+  let min = 0, km = null;
+  const h = t.match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours)\b/); if (h) min += +h[1]*60;
+  const m = t.match(/(\d+)\s*(m|min|mins|minute|minutes)\b/); if (m) min += +m[1];
+  if (!min && /\b(an|one) hour\b/.test(t)) min = 60; if (/\bhalf an hour\b/.test(t)) min = 30; if (/\b(an|one) and a half hours?\b/.test(t)) min = 90;
+  const d = t.match(/(\d+(?:\.\d+)?)\s*(km|k)\b/); if (d) km = +d[1];
+  if (!(min > 0) || min > 600) return null;
+  // Anything else in the entry (overs, runs, scores, places…) is detail for the AI coach.
+  let rest = t.replace(def[2], ' ').replace(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|km|k)\b/g, ' ').replace(/\bhalf an hour\b|\b(an|one) hour\b/g,' ');
+  for (const [re] of SPORT_LEVEL) rest = rest.replace(re, ' ');
+  if (rest.split(' ').some(w => w && !SPORT_FILLER.has(w))) return null;
+  let lvl = 1; for (const [re, l] of SPORT_LEVEL) if (re.test(t)) { lvl = l; break; }
+  const prof1 = ((prof().sports||{})[def[0]]||{}).answers||[];
+  if (lvl===1 && prof1.some(a => /singles|competitive|tournament|advanced/i.test(String(a.a||'')))) lvl = 2;
+  let met = def[3][lvl];
+  // With a distance, pace sets the effort for running, walking and cycling.
+  if (km && ['running','walking','cycling'].includes(def[0])) { const kmh = km/(min/60);
+    met = def[0]==='running' ? Math.min(16, Math.max(6, kmh*1.0)) : def[0]==='walking' ? (kmh<4?3:kmh<5.5?3.5:kmh<6.5?4.3:5) : (kmh<16?5.8:kmh<19?6.8:kmh<22?8:10); }
+  const lvlWord = ['light','moderate','hard'][lvl];
+  const hours = met >= 7 && min >= 60 ? 36 : met >= 5 && min >= 45 ? 24 : 12;
+  return {key:def[0], name:def[1], minutes:min, res:{local:true, title:def[1], summary:`${n0(min)} min${km?`, ${n1(km)} km`:''}, ${lvlWord} effort`, minutes:min,
+    components:[{part:`${def[1]}, ${lvlWord}`, minutes:min, met}], rpe:[4,6,8][lvl],
+    recovery:{hours, level:hours>=36?'hard':hours>=24?'moderate':'light', summary:`About ${hours} hours before another hard ${def[1].toLowerCase()} session.`, tips:['Drink water with a pinch of salt if you sweated a lot.','Eat a meal with protein and carbs within a couple of hours.']},
+    assumptions:`Estimated without AI from typical ${lvlWord} ${def[1].toLowerCase()} (MET ${n1(met)}). Add words like casual, singles or competitive to adjust.`}};
 }
 function queueCard(){
   const it = S.queue[0]; if (!it) return '';
   if (S.qBusy) return `<div class="qcard"><div class="qhead">${esc(S.qStatus||'Working…')}</div></div>`;
-  if (it.type==='coach' && it.failed) return `<div class="qcard"><div class="qhead">${esc(it.name)}</div><div class="status err">${esc(S.qStatus)}</div>
-    <div class="row"><button class="btn ghost sm" data-action="qDiscard">Discard</button><span class="spacer"></span><button class="btn sm" data-action="qRetry">Try again</button></div></div>`;
+  if (it.type==='coach' && it.failed) { const est = sportFromText(it.entry.replace(/\b(bowled|faced|batted|overs?|balls?|runs?|wickets?|scored?|won|lost)\b[^,]*/gi,' '), it.date) || (sportFromText(`${it.name} ${(it.entry.match(/\d+(?:\.\d+)?\s*(?:h|hr|hrs|hours?|m|mins?|minutes?)\b/gi)||[]).join(' ')}`, it.date));
+    return `<div class="qcard"><div class="qhead">${esc(it.name)}</div><div class="status err">${esc(S.qStatus)}</div>
+    <div class="row"><button class="btn ghost sm" data-action="qDiscard">Discard</button>${est?'<button class="btn ghost sm" data-action="qLocal">Log an estimate without AI</button>':''}<span class="spacer"></span><button class="btn sm" data-action="qRetry">Try again</button></div></div>`; }
   if (it.type==='profile') return `<div class="qcard"><div class="qhead">${it.isNew?`New sport: ${esc(it.name)}. Tell me how you play and I’ll remember it.`:`Update how you play ${esc(it.name)}`}</div>
     <div class="qs">${qHtml(it.questions||[], it.answers, 'q')}</div>
     <div class="row"><button class="btn ghost sm" data-action="qSkipProfile">Skip for now</button><span class="spacer"></span><button class="btn sm" data-action="qSaveProfile">Save${S.queue[1]?' and continue':''}</button></div></div>`;
@@ -2685,6 +2749,8 @@ document.addEventListener('click', ev => {
     case 'faceIdSignIn': authFaceId(); break;
     case 'faceIdSetup': setupFaceId(); break;
     case 'howto': openHowto(b.dataset.name||''); break;
+    case 'qLocal': { const it = S.queue[0]; if (!it) break; const est = sportFromText(it.entry.replace(/\b(bowled|faced|batted|overs?|balls?|runs?|wickets?|scored?|won|lost)\b[^,]*/gi,' '), it.date) || sportFromText(`${it.name} ${(it.entry.match(/\d+(?:\.\d+)?\s*(?:h|hr|hrs|hours?|m|mins?|minutes?)\b/gi)||[]).join(' ')}`, it.date);
+      if (!est) break; S.queue.shift(); saveActivity(it, est.res).then(() => { render(); if (S.queue.length) runQueue(); }); break; }
     case 'editSupp': openSuppEdit(b.dataset.id||''); break;
     case 'restSet': startRest(+b.dataset.s); break;
     case 'restStop': stopRest(); break;
