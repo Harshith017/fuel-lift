@@ -1844,6 +1844,8 @@ function viewToday(){
           ['Carbs', t.carbs, T.carbs, 'g', 'range', 'var(--carbs)'],
           ['Protein', t.protein, T.protein, 'g', 'more', 'var(--protein)'],
           ['Fat', t.fat, T.fat, 'g', 'range', 'var(--fat)'],
+          ['Saturated', t.micros.sat_fat_g, T.micros.sat_fat_g, 'g', 'limit', 'var(--fat)', true],
+          ['Unsaturated', Math.max(0, t.fat - t.micros.sat_fat_g), 0, 'g', 'info', 'var(--fat)', true],
           ['Fibre', t.fiber, T.fiber, 'g', 'more', 'var(--ink-3)'],
           ['Added sugar', t.sugar, T.sugar, 'g', 'limit', 'var(--ink-3)'],
         ];
@@ -1852,8 +1854,11 @@ function viewToday(){
             <div class="ringc"><b>${hasFood?Math.round(P(t.kcal,T.kcal)):0}%</b><span>of goal</span></div></div>
           <div class="nsum"><span class="muted small">You have eaten</span><div class="nbig"><b style="color:${stK?stText(stK):'var(--accent-text)'}">${n0(t.kcal)}</b> kcal</div><span class="muted small">of ${n0(T.kcal)} kcal</span>${statePill(stK)}</div>
         </div>
-        <div class="mrows">${rows.map(([l,v,tg,u,kind,c])=>{ const st = hasFood ? goalState(v,tg,kind) : null;
-          return `<div class="mrow"><span class="sw" style="background:${c}"></span><span class="ml">${l}</span><span class="mv">${n0(v)}<span class="muted"> / ${kind==='limit'?'≤':''}${n0(tg)} ${u}</span></span><span class="mp" style="color:${st?stText(st):'var(--ink-3)'}">${hasFood?Math.round(P(v,tg)):0}%</span>${statePill(st)||'<span></span>'}</div>`; }).join('')}</div>
+        <div class="mrows">${rows.map(([l,v,tg,u,kind,c,sub])=>{
+          // Unsaturated has no target: show its share of the fat eaten instead.
+          if (kind==='info') return `<div class="mrow sub"><span class="sw"></span><span class="ml">${l}</span><span class="mv">${n0(v)}<span class="muted"> g</span></span><span class="mp muted">${t.fat>0?Math.round(v/t.fat*100)+'%':''}</span><span class="muted small">of fat</span></div>`;
+          const st = hasFood ? goalState(v,tg,kind) : null;
+          return `<div class="mrow${sub?' sub':''}"><span class="sw" style="background:${c}"></span><span class="ml">${l}</span><span class="mv">${n0(v)}<span class="muted"> / ${kind==='limit'?'≤':''}${n0(tg)} ${u}</span></span><span class="mp" style="color:${st?stText(st):'var(--ink-3)'}">${hasFood?Math.round(P(v,tg)):0}%</span>${statePill(st)||'<span></span>'}</div>`; }).join('')}</div>
         <div class="stat3">
           <div data-tip="${esc(burnTip(B))}"><b style="color:${stText('plus')}">${emptyDay?'—':n0(B.total)}</b><span>kcal burned</span></div>
           <div><b>${emptyDay?'—':n0(B.training)}</b><span>training</span></div>
